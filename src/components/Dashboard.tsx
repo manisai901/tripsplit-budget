@@ -8,14 +8,16 @@ export default function Dashboard() {
   const { trips, createTrip, joinTrip, setActiveTripId, indexErrorUrl, isIndexBuilding } = useTrip();
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+  const [isHowToUseOpen, setIsHowToUseOpen] = useState(false);
+  const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [joinId, setJoinId] = useState('');
-  const [newTrip, setNewTrip] = useState({ name: '', destination: '', budget: 0, currency: 'USD' });
+  const [newTrip, setNewTrip] = useState({ name: '', destination: '', budget: 0, currency: 'INR' });
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     await createTrip(newTrip);
     setIsCreating(false);
-    setNewTrip({ name: '', destination: '', budget: 0, currency: 'USD' });
+    setNewTrip({ name: '', destination: '', budget: 0, currency: 'INR' });
   };
 
   const handleJoin = async (e: FormEvent) => {
@@ -292,6 +294,93 @@ export default function Dashboard() {
           </motion.div>
         </div>
       )}
+
+      {/* How To Use Modal */}
+      {isHowToUseOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="absolute inset-0 bg-black/60 backdrop-blur-md"
+            onClick={() => setIsHowToUseOpen(false)}
+          />
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl p-8 shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
+          >
+            <h2 className="text-2xl font-bold mb-4 dark:text-white">How This App Works</h2>
+            <div className="space-y-4 text-sm text-slate-600 dark:text-slate-300 font-medium">
+              <p>🧳 <strong>Create & Join Trips:</strong> Plan new trips, set budgets, and invite your friends by sharing a unique Trip ID.</p>
+              <p>💸 <strong>Track Expenses:</strong> Record trip expenses (transport, food, stay) seamlessly. Parity logic calculates who paid what and what their share is in real-time.</p>
+              <p>✔ <strong>Mission Objectives:</strong> Keep a shared checklist for everyone in the group with due times.</p>
+              <p>🔒 <strong>Secure & Real-time:</strong> Logged in via Google globally with live synchronization across all devices and Firebase security rules.</p>
+            </div>
+            <button 
+              onClick={() => setIsHowToUseOpen(false)}
+              className="mt-8 w-full h-12 rounded-xl font-bold bg-slate-900 dark:bg-orange-600 text-white shadow-lg transition-all active:scale-95"
+            >
+              Got it!
+            </button>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Support Modal */}
+      {isSupportOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="absolute inset-0 bg-black/60 backdrop-blur-md"
+            onClick={() => setIsSupportOpen(false)}
+          />
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-8 shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 text-center"
+          >
+            <h2 className="text-2xl font-bold mb-4 dark:text-white">Need Help?</h2>
+            <p className="text-sm text-slate-600 dark:text-slate-300 font-medium mb-6">
+              If you have any issues or questions forming your journey, reach out to us.
+            </p>
+            <a 
+              href="mailto:manikantasaivootla@gmail.com" 
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full h-12 flex items-center justify-center rounded-xl font-bold bg-slate-900 dark:bg-orange-600 text-white shadow-lg transition-all active:scale-95 mb-4"
+            >
+              manikantasaivootla@gmail.com
+            </a>
+            <button 
+              onClick={() => setIsSupportOpen(false)}
+              className="w-full h-12 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 transition-all active:scale-95"
+            >
+              Close
+            </button>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Support Footer */}
+      <footer className="mt-16 pt-8 border-t border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 text-xs font-medium text-slate-500">
+        <p>&copy; {new Date().getFullYear()} JourneyTracker.</p>
+        <div className="flex items-center gap-4 border border-slate-200 dark:border-slate-800 rounded-full px-4 py-2 bg-white dark:bg-slate-900">
+          <button 
+            onClick={() => setIsHowToUseOpen(true)}
+            className="hover:text-amber-600 dark:hover:text-amber-400 transition-colors uppercase tracking-widest font-bold"
+          >
+            How to use
+          </button>
+          <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+          <button 
+            onClick={() => setIsSupportOpen(true)}
+            className="hover:text-amber-600 dark:hover:text-amber-400 transition-colors uppercase tracking-widest font-bold"
+          >
+            Support
+          </button>
+        </div>
+      </footer>
     </div>
   );
 }
