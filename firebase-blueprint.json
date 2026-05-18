@@ -1,0 +1,101 @@
+{
+  "entities": {
+    "Trip": {
+      "title": "Trip",
+      "description": "A travel journey shared among friends.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "The name of the trip." },
+        "destination": { "type": "string", "description": "Trip destination." },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "budget": { "type": "number", "description": "Total budget for the trip." },
+        "currency": { "type": "string", "description": "Currency used (e.g., USD, EUR)." },
+        "ownerId": { "type": "string", "description": "UID of the trip creator." },
+        "members": { "type": "array", "description": "List of participant UIDs for secure listing.", "items": { "type": "string" } },
+        "inviteCode": { "type": "string", "description": "Code to join the trip." },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "ownerId", "createdAt"]
+    },
+    "Member": {
+      "title": "Member",
+      "description": "A participant in a trip.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID." },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "editor", "viewer"] },
+        "joinedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "joinedAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "An individual expenditure during the trip.",
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "payerId": { "type": "string", "description": "UID of the person who paid." },
+        "splitType": { "type": "string", "enum": ["equal", "exact", "percentage"] },
+        "participants": { "type": "array", "description": "List of UIDs involved in the split." },
+        "date": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["amount", "description", "payerId", "date", "createdAt"]
+    },
+    "ChecklistItem": {
+      "title": "ChecklistItem",
+      "description": "A task or item to complete for the trip.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "completed", "createdAt"]
+    },
+    "Settlement": {
+      "title": "Settlement",
+      "description": "A repayment between members.",
+      "type": "object",
+      "properties": {
+        "fromId": { "type": "string" },
+        "toId": { "type": "string" },
+        "amount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "completed"] },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fromId", "toId", "amount", "status", "date"]
+    }
+  },
+  "firestore": {
+    "/trips/{tripId}": {
+      "schema": "Trip",
+      "description": "Main trip document."
+    },
+    "/trips/{tripId}/members/{memberId}": {
+      "schema": "Member",
+      "description": "Members authorized for the trip."
+    },
+    "/trips/{tripId}/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Expenses associated with the trip."
+    },
+    "/trips/{tripId}/checklist/{itemId}": {
+      "schema": "ChecklistItem",
+      "description": "Common checklist for the trip."
+    },
+    "/trips/{tripId}/settlements/{settlementId}": {
+      "schema": "Settlement",
+      "description": "Money transfers between friends."
+    }
+  }
+}

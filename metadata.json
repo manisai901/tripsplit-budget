@@ -1,0 +1,8 @@
+{
+  "name": "NomadPay",
+  "description": "Collaborative travel expense sharing with real-time sync, smart splitting, and a vibrant travel aesthetic.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
