@@ -1,11 +1,11 @@
-import { Plus, MapPin, Calendar, Users, ArrowRight, Wallet, ChevronRight, UserPlus, Link as LinkIcon } from 'lucide-react';
+import { Plus, MapPin, Calendar, Users, ArrowRight, Wallet, ChevronRight, UserPlus, Link as LinkIcon, AlertTriangle, ExternalLink } from 'lucide-react';
 import { useTrip } from '../context/TripContext';
-import { formatDate, formatCurrency } from '../lib/utils';
+import { formatDate, formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import { useState, FormEvent } from 'react';
 
 export default function Dashboard() {
-  const { trips, createTrip, joinTrip, setActiveTripId } = useTrip();
+  const { trips, createTrip, joinTrip, setActiveTripId, indexErrorUrl, isIndexBuilding } = useTrip();
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [joinId, setJoinId] = useState('');
@@ -28,6 +28,71 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 py-20 md:py-24 min-h-screen">
+      {indexErrorUrl && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={cn(
+            "mb-8 p-4 border rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4",
+            isIndexBuilding 
+              ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800" 
+              : "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
+          )}
+        >
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "p-2 rounded-full",
+              isIndexBuilding 
+                ? "bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-400"
+                : "bg-amber-100 dark:bg-amber-800 text-amber-600 dark:text-amber-400"
+            )}>
+              {isIndexBuilding ? (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                >
+                  <AlertTriangle className="w-5 h-5" />
+                </motion.div>
+              ) : (
+                <AlertTriangle className="w-5 h-5" />
+              )}
+            </div>
+            <div>
+              <h4 className={cn(
+                "text-sm font-bold",
+                isIndexBuilding ? "text-blue-900 dark:text-blue-200" : "text-amber-900 dark:text-amber-200"
+              )}>
+                {isIndexBuilding ? "Database Index Provisioning" : "Database Index Required"}
+              </h4>
+              <p className={cn(
+                "text-[10px] font-medium leading-relaxed",
+                isIndexBuilding ? "text-blue-700 dark:text-blue-400" : "text-amber-700 dark:text-amber-400"
+              )}>
+                {isIndexBuilding 
+                  ? "Your data views are being prepared. This usually takes 1-2 minutes by Firebase. The page will update automatically when ready." 
+                  : "To sort your journeys by date, please click the button to the right to create a required composite index in your Firebase Console."}
+              </p>
+            </div>
+          </div>
+          {!isIndexBuilding && (
+            <a 
+              href={indexErrorUrl} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95"
+            >
+              Create Index
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+          {isIndexBuilding && (
+            <div className="flex items-center gap-2 px-6 py-3 bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-400 text-[10px] font-bold uppercase tracking-widest rounded-xl">
+              Building...
+            </div>
+          )}
+        </motion.div>
+      )}
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
         <div>
           <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Trip Dashboard</span>

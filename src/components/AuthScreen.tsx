@@ -1,9 +1,14 @@
-import { Plane, Globe, Compass, Wallet, AlertCircle } from 'lucide-react';
+import { Plane, Globe, Compass, Wallet, AlertCircle, Moon, Sun } from 'lucide-react';
 import { loginWithGoogle } from '../lib/firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { useState } from 'react';
 
-export default function AuthScreen() {
+interface AuthScreenProps {
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
+}
+
+export default function AuthScreen({ theme, setTheme }: AuthScreenProps) {
   const [error, setError] = useState<string | null>(null);
 
   const handleLogin = async () => {
@@ -38,6 +43,16 @@ export default function AuthScreen() {
         transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
         className="absolute bottom-[-10%] left-[-10%] w-[50%] aspect-square rounded-full bg-slate-500/5 dark:bg-slate-400/5 blur-[100px]"
       />
+
+      {/* Theme Toggle for AuthScreen */}
+      <div className="absolute top-6 right-6 z-50">
+        <button 
+          onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+          className="p-3 rounded-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm hover:scale-105 active:scale-95 transition-all text-slate-500 dark:text-slate-400"
+        >
+          {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+        </button>
+      </div>
 
       <div className="max-w-4xl w-full grid md:grid-cols-2 gap-12 items-center relative z-10">
         <motion.div

@@ -70,6 +70,9 @@ interface TripContextType {
   expenses: Expense[];
   checklist: ChecklistItem[];
   members: Member[];
+  loading: boolean;
+  indexErrorUrl: string | null;
+  isIndexBuilding: boolean;
   setActiveTripId: (id: string | null) => void;
   createTrip: (data: Partial<Trip>) => Promise<void>;
   joinTrip: (tripId: string) => Promise<void>;
@@ -77,7 +80,6 @@ interface TripContextType {
   addChecklistItem: (tripId: string, text: string) => Promise<void>;
   toggleChecklistItem: (tripId: string, itemId: string, completed: boolean) => Promise<void>;
   removeMember: (tripId: string, memberId: string) => Promise<void>;
-  loading: boolean;
 }
 
 const TripContext = createContext<TripContextType | undefined>(undefined);
@@ -90,6 +92,8 @@ export function TripProvider({ children }: { children: ReactNode }) {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [indexErrorUrl, setIndexErrorUrl] = useState<string | null>(null);
+  const [isIndexBuilding, setIsIndexBuilding] = useState(false);
 
   const activeTrip = useMemo(() => trips.find(t => t.id === activeTripId) || null, [trips, activeTripId]);
 
@@ -112,9 +116,21 @@ export function TripProvider({ children }: { children: ReactNode }) {
         const tripsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Trip));
         setTrips(tripsData);
         setLoading(false);
+        setIndexErrorUrl(null);
+        setIsIndexBuilding(false);
       },
       (error) => {
+        if (error.message.includes('requires an index') || error.message.includes('index-needed')) {
+          const match = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s"]+/);
+          if (match) {
+            setIndexErrorUrl(match[0]);
+          }
+          if (error.message.includes('currently building')) {
+            setIsIndexBuilding(true);
+          }
+        }
         handleFirestoreError(error, OperationType.LIST, 'trips');
+        setLoading(false);
       }
     );
 
@@ -277,14 +293,16 @@ export function TripProvider({ children }: { children: ReactNode }) {
       expenses, 
       checklist,
       members,
+      loading,
+      indexErrorUrl,
+      isIndexBuilding,
       setActiveTripId, 
       createTrip, 
       joinTrip,
       addExpense,
       addChecklistItem,
       toggleChecklistItem,
-      removeMember,
-      loading 
+      removeMember
     }}>
       {children}
     </TripContext.Provider>

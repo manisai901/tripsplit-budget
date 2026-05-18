@@ -4,22 +4,15 @@ import { logout } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
 
-export default function Header() {
+interface HeaderProps {
+  theme: 'light' | 'dark';
+  setTheme: (theme: 'light' | 'dark') => void;
+}
+
+export default function Header({ theme, setTheme }: HeaderProps) {
   const { user } = useAuth();
-  const [theme, setTheme] = useState<'light' | 'dark'>(
-    (localStorage.getItem('theme') as any) || 'light'
-  );
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
-
-  useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-    localStorage.setItem('theme', theme);
-  }, [theme]);
 
   const switchAccount = async () => {
     setIsMenuOpen(false);

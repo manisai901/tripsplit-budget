@@ -12,9 +12,23 @@ import TripDetail from './components/TripDetail';
 import RouteProgressBar from './components/RouteProgressBar';
 import { AnimatePresence, motion } from 'motion/react';
 
+import { useEffect, useState } from 'react';
+
 function AppContent() {
   const { user, loading: authLoading } = useAuth();
   const { activeTrip, loading: tripsLoading } = useTrip();
+  const [theme, setTheme] = useState<'light' | 'dark'>(
+    (localStorage.getItem('theme') as any) || 'light'
+  );
+
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   if (authLoading) {
     return (
@@ -29,13 +43,13 @@ function AppContent() {
   }
 
   if (!user) {
-    return <AuthScreen />;
+    return <AuthScreen theme={theme} setTheme={setTheme} />;
   }
 
   return (
     <div className="min-h-screen relative">
       <RouteProgressBar />
-      <Header />
+      <Header theme={theme} setTheme={setTheme} />
       
       <main className="animate-fade-in relative z-10">
         <AnimatePresence mode="wait">
