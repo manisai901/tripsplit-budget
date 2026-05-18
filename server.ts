@@ -26,7 +26,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`NomadPay Server running on http://localhost:${PORT}`);
+    console.log(`Mani Traveler Server running on http://localhost:${PORT}`);
   });
 }
 

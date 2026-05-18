@@ -38,7 +38,7 @@ export default function Header() {
           <Plane className="text-white w-4 h-4 md:w-5 md:h-5" />
         </div>
         <div className="flex flex-col">
-          <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-wider text-slate-400 leading-none">NomadPay</span>
+          <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-wider text-slate-400 leading-none">Mani Traveler</span>
           <span className="text-sm md:text-lg font-bold text-slate-800 dark:text-white leading-tight truncate max-w-[120px] md:max-w-none">
             {user ? 'My Journeys' : 'Trip Explorer'}
           </span>

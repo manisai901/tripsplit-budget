@@ -1,8 +1,24 @@
-import { Plane, Globe, Compass, Wallet } from 'lucide-react';
+import { Plane, Globe, Compass, Wallet, AlertCircle } from 'lucide-react';
 import { loginWithGoogle } from '../lib/firebase';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+import { useState } from 'react';
 
 export default function AuthScreen() {
+  const [error, setError] = useState<string | null>(null);
+
+  const handleLogin = async () => {
+    try {
+      setError(null);
+      await loginWithGoogle();
+    } catch (err: any) {
+      console.error('Login error:', err);
+      if (err.code === 'auth/unauthorized-domain') {
+        setError('Unauthorized Domain: Please add this domain to your Firebase Authorized Domains list.');
+      } else {
+        setError('Failed to sign in. Please try again.');
+      }
+    }
+  };
   return (
     <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden bg-[#F9FAFB] dark:bg-slate-950 transition-colors">
       {/* Decorative Elements */}
@@ -36,7 +52,7 @@ export default function AuthScreen() {
           </div>
           
           <h1 className="text-5xl md:text-8xl font-black leading-[0.9] tracking-tighter mb-6 text-slate-900 dark:text-white">
-            Nomad<span className="text-orange-500">Pay</span>.
+            Mani<span className="text-orange-500"> Traveler</span>.
           </h1>
           
           <p className="text-base md:text-lg text-slate-500 dark:text-slate-400 leading-relaxed mb-8 max-w-sm md:max-w-md font-medium">
@@ -58,8 +74,22 @@ export default function AuthScreen() {
             </div>
           </div>
 
+          <AnimatePresence>
+            {error && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="mb-6 p-4 bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-800 rounded-xl flex items-center gap-3 text-red-600 dark:text-red-400 text-xs font-bold leading-relaxed"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <p>{error}</p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           <button
-            onClick={loginWithGoogle}
+            onClick={handleLogin}
             className="w-full sm:w-auto group relative flex items-center justify-center gap-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 px-8 py-5 md:py-4 rounded-2xl font-bold transition-all hover:scale-[1.02] active:scale-95 shadow-xl overflow-hidden"
           >
             <div className="absolute inset-0 bg-white dark:bg-black opacity-0 group-hover:opacity-10 transition-opacity" />

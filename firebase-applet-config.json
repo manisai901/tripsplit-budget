@@ -1,10 +1,9 @@
 {
-  "projectId": "quadratic-trainer-tsjh2",
-  "appId": "1:532889988767:web:cd86aa18e2fb76f4573caa",
-  "apiKey": "AIzaSyCt44Sk0H2QSdfVREUN7VHXDGzE6PAet3U",
-  "authDomain": "quadratic-trainer-tsjh2.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-3bf4f8bb-607e-441b-b2b5-3add05a7e9ea",
-  "storageBucket": "quadratic-trainer-tsjh2.firebasestorage.app",
-  "messagingSenderId": "532889988767",
-  "measurementId": ""
+  "projectId": "butget-trip",
+  "appId": "1:1000911938989:web:6aed298f52effa30672d24",
+  "apiKey": "AIzaSyC1lAw3TAytWU-w16lO_rPiag1PomolNWs",
+  "authDomain": "butget-trip.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "butget-trip.firebasestorage.app",
+  "messagingSenderId": "1000911938989"
 }

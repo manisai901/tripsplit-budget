@@ -1,4 +1,4 @@
-# Security Specification - NomadPay
+# Security Specification - Mani Traveler
 
 ## Data Invariants
 1. A trip must have an owner who is the first member.

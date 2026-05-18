@@ -30,7 +30,7 @@ export default function Dashboard() {
     <div className="max-w-7xl mx-auto px-4 md:px-6 py-20 md:py-24 min-h-screen">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
         <div>
-          <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Nomad Console</span>
+          <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Trip Dashboard</span>
           <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-white">My Journeys</h2>
         </div>
         <div className="flex items-center gap-3">
