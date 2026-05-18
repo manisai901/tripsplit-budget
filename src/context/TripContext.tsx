@@ -48,6 +48,7 @@ interface ChecklistItem {
   createdByName: string;
   createdAt: any;
   completedAt?: any;
+  dueTime?: string;
 }
 
 interface Expense {
@@ -62,6 +63,7 @@ interface Expense {
   date: string;
   createdAt: any;
   createdByName: string;
+  time?: string;
 }
 
 interface TripContextType {
@@ -77,7 +79,7 @@ interface TripContextType {
   createTrip: (data: Partial<Trip>) => Promise<void>;
   joinTrip: (tripId: string) => Promise<void>;
   addExpense: (tripId: string, data: Partial<Expense>) => Promise<void>;
-  addChecklistItem: (tripId: string, text: string) => Promise<void>;
+  addChecklistItem: (tripId: string, text: string, dueTime?: string) => Promise<void>;
   toggleChecklistItem: (tripId: string, itemId: string, completed: boolean) => Promise<void>;
   removeMember: (tripId: string, memberId: string) => Promise<void>;
 }
@@ -234,14 +236,15 @@ export function TripProvider({ children }: { children: ReactNode }) {
         payerId: user.uid,
         payerName: user.displayName,
         createdByName: user.displayName,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        time: data.time || null
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/expenses`);
     }
   };
 
-  const addChecklistItem = async (tripId: string, text: string) => {
+  const addChecklistItem = async (tripId: string, text: string, dueTime?: string) => {
     if (!user) return;
     try {
       await addDoc(collection(db, 'trips', tripId, 'checklist'), {
@@ -249,7 +252,8 @@ export function TripProvider({ children }: { children: ReactNode }) {
         completed: false,
         createdBy: user.uid,
         createdByName: user.displayName,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        dueTime: dueTime || null
       });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/checklist`);

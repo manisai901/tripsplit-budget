@@ -3,7 +3,7 @@ import {
   Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X
 } from 'lucide-react';
 import { useTrip } from '../context/TripContext';
-import { formatDate, formatCurrency, cn } from '../lib/utils';
+import { formatDate, formatCurrency, cn, formatDateTime } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useMemo, FormEvent } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -18,14 +18,49 @@ export default function TripDetail() {
     description: '', 
     amount: 0, 
     category: 'Food', 
-    date: new Date().toISOString().split('T')[0] 
+    date: new Date().toISOString().split('T')[0],
+    time: ''
   });
   const [customCategory, setCustomCategory] = useState('');
   const [newCheckItem, setNewCheckItem] = useState('');
+  const [newCheckTime, setNewCheckTime] = useState('');
 
   const totalSpent = useMemo(() => 
     expenses.reduce((sum, exp) => sum + exp.amount, 0), 
   [expenses]);
+
+  const settlementData = useMemo(() => {
+    const data: Record<string, { paid: number; share: number }> = {};
+    
+    // Initialize
+    members.forEach(m => {
+      data[m.uid] = { paid: 0, share: 0 };
+    });
+
+    // Calculate
+    expenses.forEach(exp => {
+      // Add to payer's paid total
+      if (data[exp.payerId]) {
+        data[exp.payerId].paid += exp.amount;
+      }
+
+      // Add to each participant's share
+      const participants = exp.participants || members;
+      const sharePerPerson = exp.amount / (participants.length || 1);
+      participants.forEach(p => {
+        if (data[p.uid || p.id]) {
+          data[p.uid || p.id].share += sharePerPerson;
+        }
+      });
+    });
+
+    return members.map(m => ({
+      ...m,
+      paid: data[m.uid]?.paid || 0,
+      share: data[m.uid]?.share || 0,
+      balance: (data[m.uid]?.paid || 0) - (data[m.uid]?.share || 0)
+    }));
+  }, [members, expenses]);
 
   const progressPercent = Math.min(100, (totalSpent / (activeTrip?.budget || 1)) * 100);
 
@@ -42,15 +77,16 @@ export default function TripDetail() {
       participants: activeTrip.members
     });
     setIsAddingExpense(false);
-    setNewExpense({ description: '', amount: 0, category: 'Food', date: new Date().toISOString().split('T')[0] });
+    setNewExpense({ description: '', amount: 0, category: 'Food', date: new Date().toISOString().split('T')[0], time: '' });
     setCustomCategory('');
   };
 
   const handleAddCheckItem = async (e: FormEvent) => {
     e.preventDefault();
     if (!activeTrip || !newCheckItem.trim()) return;
-    await addChecklistItem(activeTrip.id, newCheckItem.trim());
+    await addChecklistItem(activeTrip.id, newCheckItem.trim(), newCheckTime);
     setNewCheckItem('');
+    setNewCheckTime('');
   };
 
   const copyTripId = () => {
@@ -161,16 +197,24 @@ export default function TripDetail() {
               </div>
             </div>
 
-            <form onSubmit={handleAddCheckItem} className="flex gap-2 mb-8">
-              <input 
-                type="text" 
-                placeholder="Add a mission objective..."
-                value={newCheckItem}
-                onChange={e => setNewCheckItem(e.target.value)}
-                className="flex-1 h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-5 text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
-              />
-              <button disabled={!newCheckItem} className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-6 rounded-xl text-xs font-bold uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
-                Add
+            <form onSubmit={handleAddCheckItem} className="flex flex-col md:flex-row gap-3 mb-8">
+              <div className="flex-1 flex gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Add a mission objective..."
+                  value={newCheckItem}
+                  onChange={e => setNewCheckItem(e.target.value)}
+                  className="flex-1 h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-5 text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
+                />
+                <input 
+                  type="time" 
+                  value={newCheckTime}
+                  onChange={e => setNewCheckTime(e.target.value)}
+                  className="w-32 h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
+                />
+              </div>
+              <button disabled={!newCheckItem} className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-8 h-12 rounded-xl text-xs font-bold uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
+                Add Objective
               </button>
             </form>
 
@@ -202,16 +246,21 @@ export default function TripDetail() {
                       <div className="flex-1 min-w-0 pointer-events-none">
                         <p className={cn("text-xs font-bold leading-tight line-clamp-2 transition-all", item.completed && "line-through text-slate-400")}>
                           {item.text}
+                          {item.dueTime && (
+                            <span className="ml-2 px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded text-[9px] font-mono no-underline inline-block">
+                              {item.dueTime}
+                            </span>
+                          )}
                         </p>
                         <div className="mt-2 flex flex-col gap-1">
                           <div className="flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-widest text-slate-400">
                             <Clock className="w-2.5 h-2.5" />
-                            {item.createdByName || 'Member'} @ {item.createdAt?.toDate ? formatDate(item.createdAt.toDate()) : 'Now'}
+                            {item.createdByName || 'Member'} @ {item.createdAt?.toDate ? formatDateTime(item.createdAt.toDate()) : 'Now'}
                           </div>
                           {item.completed && item.completedAt && (
                             <div className="flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-500">
                               <CheckCircle2 className="w-2.5 h-2.5" />
-                              Closed @ {formatDate(item.completedAt.toDate())}
+                              Closed @ {formatDateTime(item.completedAt.toDate())}
                             </div>
                           )}
                         </div>
@@ -271,10 +320,15 @@ export default function TripDetail() {
                         </div>
                       </div>
                     </div>
-                    <div className="text-right">
+                    <div className="flex flex-col items-end">
                       <span className="text-base md:text-lg font-black text-slate-900 dark:text-white font-mono">
                         {formatCurrency(expense.amount, activeTrip.currency)}
                       </span>
+                      {expense.time && (
+                        <span className="text-[9px] font-mono text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded mt-1 leading-none shadow-sm">
+                          {expense.time}
+                        </span>
+                      )}
                     </div>
                   </motion.div>
                 ))
@@ -328,17 +382,45 @@ export default function TripDetail() {
             </button>
           </div>
           
-          <div className="bg-slate-900 text-white p-8 rounded-3xl relative overflow-hidden group shadow-2xl">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/20 blur-3xl rounded-full" />
-            <h4 className="text-xs font-bold uppercase tracking-[0.2em] opacity-50 mb-6">Settlement Parity</h4>
-            <div className="space-y-6">
-              <div>
-                <p className="text-[10px] font-bold uppercase opacity-40 mb-1">Unsettled Pot</p>
-                <p className="text-3xl font-black font-mono">{formatCurrency(totalSpent, activeTrip.currency)}</p>
+          <div className="bg-slate-900 text-white p-6 rounded-3xl relative overflow-hidden group shadow-2xl">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/10 blur-3xl rounded-full" />
+            <div className="relative z-10">
+              <h4 className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-50 mb-6 flex items-center justify-between">
+                Settlement Parity
+                <TrendingUp className="w-3 h-3 text-orange-400" />
+              </h4>
+              
+              <div className="space-y-4 mb-6">
+                {settlementData.map(member => (
+                  <div key={member.uid} className="flex flex-col gap-1.5 p-3 rounded-2xl bg-white/5 border border-white/5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <img 
+                          src={member.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${member.uid}`} 
+                          className="w-5 h-5 rounded-full border border-white/10"
+                          alt=""
+                        />
+                        <span className="text-[10px] font-bold truncate max-w-[80px]">{member.displayName}</span>
+                      </div>
+                      <span className={cn(
+                        "text-[10px] font-black font-mono px-2 py-0.5 rounded",
+                        member.balance >= 0 ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                      )}>
+                        {member.balance >= 0 ? '+' : ''}{formatCurrency(member.balance, activeTrip.currency)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest opacity-40">
+                      <span>Paid: {formatCurrency(member.paid, activeTrip.currency)}</span>
+                      <span>Share: {formatCurrency(member.share, activeTrip.currency)}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <button className="w-full bg-white text-slate-900 py-3 rounded-xl font-bold text-xs uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all shadow-xl">
-                Start Equalizing
-              </button>
+
+              <div className="pt-4 border-t border-white/10">
+                <p className="text-[10px] font-bold uppercase opacity-40 mb-1">Total Expedition Fund</p>
+                <p className="text-2xl font-black font-mono">{formatCurrency(totalSpent, activeTrip.currency)}</p>
+              </div>
             </div>
           </div>
         </div>
@@ -377,21 +459,20 @@ export default function TripDetail() {
                     className="w-full h-12 px-5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-orange-500/10 transition-all dark:text-white text-sm"
                   />
                 </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Amount ({activeTrip.currency})</label>
+                  <input 
+                    required
+                    type="number" 
+                    step="0.01"
+                    placeholder="0.00"
+                    value={newExpense.amount || ''}
+                    onChange={e => setNewExpense({...newExpense, amount: Number(e.target.value)})}
+                    className="w-full h-12 px-5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none dark:text-white font-mono text-sm"
+                  />
+                </div>
+                
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Amount ({activeTrip.currency})</label>
-                    <div className="relative">
-                      <input 
-                        required
-                        type="number" 
-                        step="0.01"
-                        placeholder="0.00"
-                        value={newExpense.amount || ''}
-                        onChange={e => setNewExpense({...newExpense, amount: Number(e.target.value)})}
-                        className="w-full h-12 px-5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none dark:text-white font-mono text-sm"
-                      />
-                    </div>
-                  </div>
                   <div>
                     <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Category</label>
                     <select 
@@ -405,6 +486,15 @@ export default function TripDetail() {
                       <option>Fun</option>
                       <option>Other</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Time</label>
+                    <input 
+                      type="time" 
+                      value={newExpense.time}
+                      onChange={e => setNewExpense({...newExpense, time: e.target.value})}
+                      className="w-full h-12 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none dark:text-white text-sm font-mono"
+                    />
                   </div>
                 </div>
 
