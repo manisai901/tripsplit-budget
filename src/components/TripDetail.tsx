@@ -3,7 +3,7 @@ import {
   Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X
 } from 'lucide-react';
 import { useTrip } from '../context/TripContext';
-import { formatDate, formatCurrency, cn, formatDateTime } from '../lib/utils';
+import { formatDate, formatCurrency, cn, formatDateTime, formatTime } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useMemo, FormEvent } from 'react';
 import { useAuth } from '../context/AuthContext';
@@ -70,8 +70,11 @@ export default function TripDetail() {
     e.preventDefault();
     if (!activeTrip) return;
     const finalCategory = newExpense.category === 'Other' ? (customCategory || 'Other') : newExpense.category;
+    const now = new Date();
+    const defaultTime = formatTime(now); // Requires 'formatTime' import if not already
     await addExpense(activeTrip.id, {
       ...newExpense,
+      time: newExpense.time || defaultTime,
       category: finalCategory,
       splitType: 'equal',
       participants: activeTrip.members
@@ -134,7 +137,7 @@ export default function TripDetail() {
               </div>
               <h1 className="text-2xl md:text-4xl font-black tracking-tight mb-4 opacity-90 text-white truncate max-w-full">{activeTrip.name}</h1>
               <div className="flex flex-wrap items-baseline gap-2 md:gap-3">
-                <h2 className="text-4xl md:text-6xl font-black tracking-tighter">
+                <h2 className="text-3xl sm:text-4xl md:text-6xl font-black tracking-tighter break-all">
                   {formatCurrency(totalSpent, activeTrip.currency)}
                 </h2>
                 <span className="text-base md:text-xl font-medium opacity-70">spent out of {formatCurrency(activeTrip.budget, activeTrip.currency)}</span>
@@ -198,7 +201,7 @@ export default function TripDetail() {
             </div>
 
             <form onSubmit={handleAddCheckItem} className="flex flex-col md:flex-row gap-3 mb-8">
-              <div className="flex-1 flex gap-2">
+              <div className="flex-1 flex flex-col sm:flex-row gap-2">
                 <input 
                   type="text" 
                   placeholder="Add a mission objective..."
@@ -210,7 +213,7 @@ export default function TripDetail() {
                   type="time" 
                   value={newCheckTime}
                   onChange={e => setNewCheckTime(e.target.value)}
-                  className="w-32 h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
+                  className="w-full sm:w-32 h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
                 />
               </div>
               <button disabled={!newCheckItem} className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-8 h-12 rounded-xl text-xs font-bold uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
@@ -276,14 +279,14 @@ export default function TripDetail() {
         {/* Expenses Table Section */}
         <div className="lg:col-span-8">
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden h-full flex flex-col">
-            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between shrink-0">
+            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
               <div>
                 <h4 className="text-xs font-bold text-slate-800 dark:text-white uppercase tracking-widest">Transaction Records</h4>
                 <p className="text-[10px] text-slate-400 font-medium mt-0.5">Verified expenses for all members.</p>
               </div>
               <button 
                 onClick={() => setIsAddingExpense(true)}
-                className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-orange-500/20"
+                className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-orange-500/20 self-start sm:self-auto"
               >
                 + Add Record
               </button>
@@ -472,30 +475,25 @@ export default function TripDetail() {
                   />
                 </div>
                 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Category</label>
-                    <select 
-                      value={newExpense.category}
-                      onChange={e => setNewExpense({...newExpense, category: e.target.value})}
-                      className="w-full h-12 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none dark:text-white text-sm"
-                    >
-                      <option>Food</option>
-                      <option>Transport</option>
-                      <option>Stay</option>
-                      <option>Fun</option>
-                      <option>Other</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Time</label>
-                    <input 
-                      type="time" 
-                      value={newExpense.time}
-                      onChange={e => setNewExpense({...newExpense, time: e.target.value})}
-                      className="w-full h-12 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none dark:text-white text-sm font-mono"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 pt-2">Category</label>
+                  <select 
+                    value={newExpense.category}
+                    onChange={e => setNewExpense({...newExpense, category: e.target.value})}
+                    className="w-full h-12 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none dark:text-white text-sm"
+                  >
+                    <option>Food</option>
+                    <option>Transport</option>
+                    <option>Stay</option>
+                    <option>Fun</option>
+                    <option>Breakfast</option>
+                    <option>Lunch</option>
+                    <option>Dinner</option>
+                    <option>Bus</option>
+                    <option>Train</option>
+                    <option>Auto</option>
+                    <option>Other</option>
+                  </select>
                 </div>
 
                 <AnimatePresence>

@@ -161,7 +161,7 @@ export default function Dashboard() {
                     </div>
                   </div>
 
-                  <h3 className="text-base font-bold text-slate-800 dark:text-white mb-1 group-hover:text-orange-500 transition-colors">{trip.name}</h3>
+                  <h3 className="text-base font-bold text-slate-800 dark:text-white mb-1 group-hover:text-orange-500 transition-colors line-clamp-2">{trip.name}</h3>
                   <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-medium mb-6">
                     <MapPin className="w-3.5 h-3.5" />
                     <span>{trip.destination || 'Global'}</span>
