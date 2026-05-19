@@ -19,7 +19,8 @@ export default function TripDetail() {
     amount: 0, 
     category: 'Food', 
     date: new Date().toISOString().split('T')[0],
-    time: ''
+    time: '',
+    payerId: user?.uid || ''
   });
   const [customCategory, setCustomCategory] = useState('');
   const [newCheckItem, setNewCheckItem] = useState('');
@@ -72,15 +73,20 @@ export default function TripDetail() {
     const finalCategory = newExpense.category === 'Other' ? (customCategory || 'Other') : newExpense.category;
     const now = new Date();
     const defaultTime = formatTime(now); // Requires 'formatTime' import if not already
+    const selectedPayerId = newExpense.payerId || user?.uid;
+    const selectedPayerName = members.find(m => m.uid === selectedPayerId)?.displayName || user?.displayName || 'Unknown';
+    
     await addExpense(activeTrip.id, {
       ...newExpense,
       time: newExpense.time || defaultTime,
       category: finalCategory,
       splitType: 'equal',
-      participants: activeTrip.members
+      participants: activeTrip.members,
+      payerId: selectedPayerId,
+      payerName: selectedPayerName
     });
     setIsAddingExpense(false);
-    setNewExpense({ description: '', amount: 0, category: 'Food', date: new Date().toISOString().split('T')[0], time: '' });
+    setNewExpense({ description: '', amount: 0, category: 'Food', date: new Date().toISOString().split('T')[0], time: '', payerId: user?.uid || '' });
     setCustomCategory('');
   };
 
@@ -516,6 +522,21 @@ export default function TripDetail() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+                
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 pt-2">Paid By</label>
+                  <select 
+                    value={newExpense.payerId || user?.uid || ''}
+                    onChange={e => setNewExpense({...newExpense, payerId: e.target.value})}
+                    className="w-full h-12 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none dark:text-white text-sm shrink-0"
+                  >
+                    {members.map(member => (
+                      <option key={member.uid} value={member.uid}>
+                        {member.displayName} {member.uid === user?.uid ? '(You)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 
                 <div className="pt-4 flex gap-3">
                   <button 

@@ -233,8 +233,8 @@ export function TripProvider({ children }: { children: ReactNode }) {
     try {
       await addDoc(collection(db, 'trips', tripId, 'expenses'), {
         ...data,
-        payerId: user.uid,
-        payerName: user.displayName,
+        payerId: data.payerId || user.uid,
+        payerName: data.payerName || user.displayName,
         createdByName: user.displayName,
         createdAt: serverTimestamp(),
         time: data.time || null
