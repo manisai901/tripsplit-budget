@@ -14,6 +14,8 @@ export default function TripDetail() {
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [isManagingAccess, setIsManagingAccess] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [splitOption, setSplitOption] = useState<'all' | 'custom'>('all');
+  const [customParticipants, setCustomParticipants] = useState<string[]>([]);
   const [newExpense, setNewExpense] = useState({ 
     description: '', 
     amount: 0, 
@@ -46,11 +48,12 @@ export default function TripDetail() {
       }
 
       // Add to each participant's share
-      const participants = exp.participants || members;
+      const participants = exp.participants || activeTrip?.members || [];
       const sharePerPerson = exp.amount / (participants.length || 1);
-      participants.forEach(p => {
-        if (data[p.uid || p.id]) {
-          data[p.uid || p.id].share += sharePerPerson;
+      participants.forEach((p: any) => {
+        const uid = typeof p === 'string' ? p : (p.uid || p.id);
+        if (data[uid]) {
+          data[uid].share += sharePerPerson;
         }
       });
     });
@@ -62,6 +65,39 @@ export default function TripDetail() {
       balance: (data[m.uid]?.paid || 0) - (data[m.uid]?.share || 0)
     }));
   }, [members, expenses]);
+
+  const explicitDebts = useMemo(() => {
+    const sortedData = [...settlementData];
+    const creditors = sortedData.filter(m => m.balance > 0.01).map(m => ({ ...m, currentBalance: m.balance }));
+    const debtors = sortedData.filter(m => m.balance < -0.01).map(m => ({ ...m, currentBalance: Math.abs(m.balance) }));
+    
+    const transactions = [];
+    
+    let i = 0;
+    let j = 0;
+    
+    while (i < creditors.length && j < debtors.length) {
+      const creditor = creditors[i];
+      const debtor = debtors[j];
+      
+      const amount = Math.min(creditor.currentBalance, debtor.currentBalance);
+      
+      transactions.push({
+        id: `${debtor.uid}-${creditor.uid}-${amount}`,
+        from: debtor.displayName,
+        to: creditor.displayName,
+        amount: amount
+      });
+      
+      creditor.currentBalance -= amount;
+      debtor.currentBalance -= amount;
+      
+      if (creditor.currentBalance < 0.01) i++;
+      if (debtor.currentBalance < 0.01) j++;
+    }
+    
+    return transactions;
+  }, [settlementData]);
 
   const progressPercent = Math.min(100, (totalSpent / (activeTrip?.budget || 1)) * 100);
 
@@ -76,16 +112,24 @@ export default function TripDetail() {
     const selectedPayerId = newExpense.payerId || user?.uid;
     const selectedPayerName = members.find(m => m.uid === selectedPayerId)?.displayName || user?.displayName || 'Unknown';
     
+    // Ensure at least one participant is selected if custom
+    let participants = splitOption === 'all' ? activeTrip.members : customParticipants;
+    if (participants.length === 0) {
+      participants = activeTrip.members; // fallback
+    }
+    
     await addExpense(activeTrip.id, {
       ...newExpense,
       time: newExpense.time || defaultTime,
       category: finalCategory,
       splitType: 'equal',
-      participants: activeTrip.members,
+      participants,
       payerId: selectedPayerId,
       payerName: selectedPayerName
     });
     setIsAddingExpense(false);
+    setSplitOption('all');
+    setCustomParticipants([]);
     setNewExpense({ description: '', amount: 0, category: 'Food', date: new Date().toISOString().split('T')[0], time: '', payerId: user?.uid || '' });
     setCustomCategory('');
   };
@@ -420,11 +464,29 @@ export default function TripDetail() {
                     </div>
                     <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest opacity-40">
                       <span>Paid: {formatCurrency(member.paid, activeTrip.currency)}</span>
-                      <span>Share: {formatCurrency(member.share, activeTrip.currency)}</span>
+                      <span>Used: {formatCurrency(member.share, activeTrip.currency)}</span>
                     </div>
                   </div>
                 ))}
               </div>
+
+              {explicitDebts.length > 0 && (
+                <div className="mb-6 pt-4 border-t border-white/10">
+                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-40 mb-3">Who Owes Whom</p>
+                  <div className="space-y-2">
+                    {explicitDebts.map(debt => (
+                      <div key={debt.id} className="flex items-center justify-between text-[11px] font-medium bg-white/5 p-2.5 rounded-xl text-slate-300">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white truncate max-w-[70px]">{debt.from}</span>
+                          <span className="text-orange-400 text-[10px]">→</span>
+                          <span className="font-bold text-white truncate max-w-[70px]">{debt.to}</span>
+                        </div>
+                        <span className="font-black font-mono">{formatCurrency(debt.amount, activeTrip.currency)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="pt-4 border-t border-white/10">
                 <p className="text-[10px] font-bold uppercase opacity-40 mb-1">Total Expedition Fund</p>
@@ -537,6 +599,84 @@ export default function TripDetail() {
                     ))}
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 pt-2">Split Preference</label>
+                  <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSplitOption('all');
+                        setCustomParticipants([]);
+                      }}
+                      className={cn(
+                        "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                        splitOption === 'all' 
+                          ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" 
+                          : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                      )}
+                    >
+                      Equal to All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSplitOption('custom');
+                        setCustomParticipants(activeTrip.members); // initialize with all selected
+                      }}
+                      className={cn(
+                        "flex-1 py-2 text-xs font-bold rounded-lg transition-all",
+                        splitOption === 'custom' 
+                          ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm" 
+                          : "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                      )}
+                    >
+                      Select Members
+                    </button>
+                  </div>
+                </div>
+
+                <AnimatePresence>
+                  {splitOption === 'custom' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden space-y-2 pt-2"
+                    >
+                      <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Who is included?</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                        {members.map(member => (
+                          <label key={member.uid} className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800 rounded-xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors border border-transparent hover:border-slate-200 dark:hover:border-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={customParticipants.includes(member.uid)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setCustomParticipants(prev => [...prev, member.uid]);
+                                } else {
+                                  // Don't allow deselecting if it's the last one
+                                  if (customParticipants.length > 1) {
+                                    setCustomParticipants(prev => prev.filter(id => id !== member.uid));
+                                  }
+                                }
+                              }}
+                              className="w-4 h-4 rounded border-slate-300 text-orange-500 focus:ring-orange-500/20"
+                            />
+                            <div className="flex items-center gap-2">
+                              {member.photoURL ? (
+                                <img src={member.photoURL} alt="" className="w-6 h-6 rounded-full" />
+                              ) : (
+                                <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700" />
+                              )}
+                              <span className="text-sm font-medium dark:text-white">{member.displayName}</span>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 
                 <div className="pt-4 flex gap-3">
                   <button 
