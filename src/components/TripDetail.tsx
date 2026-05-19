@@ -1,6 +1,6 @@
 import { 
   ArrowLeft, Plus, DollarSign, PieChart, Users, Receipt, 
-  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X
+  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon
 } from 'lucide-react';
 import { useTrip } from '../context/TripContext';
 import { formatDate, formatCurrency, cn, formatDateTime, formatTime } from '../lib/utils';
@@ -14,8 +14,11 @@ export default function TripDetail() {
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [isManagingAccess, setIsManagingAccess] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [expandedMember, setExpandedMember] = useState<string | null>(null);
   const [splitOption, setSplitOption] = useState<'all' | 'custom'>('all');
   const [customParticipants, setCustomParticipants] = useState<string[]>([]);
+  const [receiptImage, setReceiptImage] = useState<string | null>(null);
+  const [previewReceipt, setPreviewReceipt] = useState<string | null>(null);
   const [newExpense, setNewExpense] = useState({ 
     description: '', 
     amount: 0, 
@@ -28,23 +31,44 @@ export default function TripDetail() {
   const [newCheckItem, setNewCheckItem] = useState('');
   const [newCheckTime, setNewCheckTime] = useState('');
 
+  const [filterCategory, setFilterCategory] = useState<string>('All');
+  const [filterPayer, setFilterPayer] = useState<string>('All');
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+
+  const filteredExpenses = useMemo(() => {
+    return expenses.filter(exp => {
+      if (filterCategory !== 'All' && exp.category !== filterCategory) return false;
+      if (filterPayer !== 'All' && exp.payerId !== filterPayer) return false;
+      if (filterStartDate && exp.date < filterStartDate) return false;
+      if (filterEndDate && exp.date > filterEndDate) return false;
+      return true;
+    });
+  }, [expenses, filterCategory, filterPayer, filterStartDate, filterEndDate]);
+
   const totalSpent = useMemo(() => 
-    expenses.reduce((sum, exp) => sum + exp.amount, 0), 
+    expenses
+      .filter(exp => exp.category !== 'Settlement')
+      .reduce((sum, exp) => sum + exp.amount, 0), 
   [expenses]);
 
   const settlementData = useMemo(() => {
-    const data: Record<string, { paid: number; share: number }> = {};
+    const data: Record<string, { paid: number; share: number; realPaid: number; realShare: number }> = {};
     
     // Initialize
     members.forEach(m => {
-      data[m.uid] = { paid: 0, share: 0 };
+      data[m.uid] = { paid: 0, share: 0, realPaid: 0, realShare: 0 };
     });
 
     // Calculate
     expenses.forEach(exp => {
+      const isSettlement = exp.category === 'Settlement';
+      
       // Add to payer's paid total
       if (data[exp.payerId]) {
         data[exp.payerId].paid += exp.amount;
+        if (!isSettlement) data[exp.payerId].realPaid += exp.amount;
       }
 
       // Add to each participant's share
@@ -54,6 +78,7 @@ export default function TripDetail() {
         const uid = typeof p === 'string' ? p : (p.uid || p.id);
         if (data[uid]) {
           data[uid].share += sharePerPerson;
+          if (!isSettlement) data[uid].realShare += sharePerPerson;
         }
       });
     });
@@ -62,6 +87,8 @@ export default function TripDetail() {
       ...m,
       paid: data[m.uid]?.paid || 0,
       share: data[m.uid]?.share || 0,
+      realPaid: data[m.uid]?.realPaid || 0,
+      realShare: data[m.uid]?.realShare || 0,
       balance: (data[m.uid]?.paid || 0) - (data[m.uid]?.share || 0)
     }));
   }, [members, expenses]);
@@ -85,7 +112,9 @@ export default function TripDetail() {
       transactions.push({
         id: `${debtor.uid}-${creditor.uid}-${amount}`,
         from: debtor.displayName,
+        fromId: debtor.uid,
         to: creditor.displayName,
+        toId: creditor.uid,
         amount: amount
       });
       
@@ -102,6 +131,21 @@ export default function TripDetail() {
   const progressPercent = Math.min(100, (totalSpent / (activeTrip?.budget || 1)) * 100);
 
   const isOwner = activeTrip?.ownerId === user?.uid;
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 1024 * 1024) { // 1MB limit for base64
+        alert("File size should be less than 1MB");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setReceiptImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleAddExpense = async (e: FormEvent) => {
     e.preventDefault();
@@ -125,11 +169,13 @@ export default function TripDetail() {
       splitType: 'equal',
       participants,
       payerId: selectedPayerId,
-      payerName: selectedPayerName
+      payerName: selectedPayerName,
+      receiptUrl: receiptImage || undefined
     });
     setIsAddingExpense(false);
     setSplitOption('all');
     setCustomParticipants([]);
+    setReceiptImage(null);
     setNewExpense({ description: '', amount: 0, category: 'Food', date: new Date().toISOString().split('T')[0], time: '', payerId: user?.uid || '' });
     setCustomCategory('');
   };
@@ -329,27 +375,132 @@ export default function TripDetail() {
         {/* Expenses Table Section */}
         <div className="lg:col-span-8">
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden h-full flex flex-col">
-            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
-              <div>
-                <h4 className="text-xs font-bold text-slate-800 dark:text-white uppercase tracking-widest">Transaction Records</h4>
-                <p className="text-[10px] text-slate-400 font-medium mt-0.5">Verified expenses for all members.</p>
+            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex flex-col gap-4 shrink-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800 dark:text-white uppercase tracking-widest">Transaction Records</h4>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">Verified expenses for all members.</p>
+                </div>
+                <div className="flex items-center gap-3 self-start sm:self-auto">
+                  <button
+                    onClick={() => setIsFiltersOpen(!isFiltersOpen)}
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all",
+                      isFiltersOpen || filterCategory !== 'All' || filterPayer !== 'All' || filterStartDate || filterEndDate
+                        ? "bg-orange-500 text-white shadow-lg shadow-orange-500/20"
+                        : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                    )}
+                  >
+                    <Filter className="w-3 h-3" />
+                    Filters
+                    {(filterCategory !== 'All' || filterPayer !== 'All' || filterStartDate || filterEndDate) && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-white ml-0.5"></span>
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => setIsAddingExpense(true)}
+                    className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-orange-500/20"
+                  >
+                    + Add Record
+                  </button>
+                </div>
               </div>
-              <button 
-                onClick={() => setIsAddingExpense(true)}
-                className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-orange-500/20 self-start sm:self-auto"
-              >
-                + Add Record
-              </button>
+
+              <AnimatePresence>
+                {isFiltersOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="pt-4 pb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 border-t border-slate-100 dark:border-slate-800 mt-2">
+                      {/* Payer Filter */}
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                          <UserIcon className="w-3 h-3" /> Payer
+                        </label>
+                        <select
+                          value={filterPayer}
+                          onChange={(e) => setFilterPayer(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none dark:text-white text-xs font-medium"
+                        >
+                          <option value="All">All Members</option>
+                          {members.map(m => (
+                            <option key={m.uid} value={m.uid}>{m.displayName}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Category Filter */}
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                          <Tag className="w-3 h-3" /> Category
+                        </label>
+                        <select
+                          value={filterCategory}
+                          onChange={(e) => setFilterCategory(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none dark:text-white text-xs font-medium"
+                        >
+                          <option value="All">All Categories</option>
+                          <option value="Food">Food</option>
+                          <option value="Transport">Transport</option>
+                          <option value="Stay">Stay</option>
+                          <option value="Fun">Fun</option>
+                          <option value="Settlement">Settlement</option>
+                          <option value="Other">Other...</option>
+                        </select>
+                      </div>
+
+                      {/* Start Date */}
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                          <CalendarIcon className="w-3 h-3" /> Start Date
+                        </label>
+                        <input
+                          type="date"
+                          value={filterStartDate}
+                          onChange={(e) => setFilterStartDate(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none dark:text-white text-xs font-medium"
+                        />
+                      </div>
+
+                      {/* End Date */}
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                          <CalendarIcon className="w-3 h-3" /> End Date
+                        </label>
+                        <input
+                          type="date"
+                          value={filterEndDate}
+                          onChange={(e) => setFilterEndDate(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none dark:text-white text-xs font-medium"
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             <div className="p-2 space-y-1 overflow-y-auto flex-1 min-h-[400px]">
-              {expenses.length === 0 ? (
+              {filteredExpenses.length === 0 ? (
                 <div className="py-20 text-center flex flex-col items-center justify-center">
                   <Receipt className="w-10 h-10 text-slate-100 dark:text-slate-800 mb-4" />
-                  <p className="text-[10px] font-bold text-slate-300 dark:text-slate-700 uppercase tracking-widest">Awaiting ledger entries...</p>
+                  <p className="text-[10px] font-bold text-slate-300 dark:text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                    {expenses.length > 0 ? "No records match filters" : "Awaiting ledger entries..."}
+                    {expenses.length > 0 && (
+                      <button onClick={() => {
+                        setFilterCategory('All');
+                        setFilterPayer('All');
+                        setFilterStartDate('');
+                        setFilterEndDate('');
+                      }} className="text-orange-500 hover:underline cursor-pointer">Clear Filters</button>
+                    )}
+                  </p>
                 </div>
               ) : (
-                expenses.map((expense, idx) => (
+                filteredExpenses.map((expense, idx) => (
                   <motion.div
                     key={expense.id}
                     initial={{ opacity: 0, y: 10 }}
@@ -362,7 +513,18 @@ export default function TripDetail() {
                         {expense.category === 'Food' ? '🍕' : expense.category === 'Transport' ? '🛥️' : expense.category === 'Stay' ? '🏨' : expense.category === 'Fun' ? '🎡' : '💸'}
                       </div>
                       <div>
-                        <h5 className="text-sm md:text-base font-bold text-slate-800 dark:text-white">{expense.description}</h5>
+                        <h5 className="text-sm md:text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                          {expense.description}
+                          {expense.receiptUrl && (
+                            <button 
+                              onClick={() => setPreviewReceipt(expense.receiptUrl!)}
+                              className="text-slate-400 hover:text-orange-500 transition-colors"
+                              title="View Receipt"
+                            >
+                              <ImageIcon className="w-4 h-4" />
+                            </button>
+                          )}
+                        </h5>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
                           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
                             By {expense.payerName || 'Member'} &bull; {formatDate(expense.date)}
@@ -445,7 +607,11 @@ export default function TripDetail() {
               
               <div className="space-y-4 mb-6">
                 {settlementData.map(member => (
-                  <div key={member.uid} className="flex flex-col gap-1.5 p-3 rounded-2xl bg-white/5 border border-white/5">
+                  <div 
+                    key={member.uid} 
+                    className="flex flex-col gap-1.5 p-3 rounded-2xl bg-white/5 border border-white/5 cursor-pointer hover:bg-white/10 transition-colors"
+                    onClick={() => setExpandedMember(expandedMember === member.uid ? null : member.uid)}
+                  >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <img 
@@ -463,9 +629,50 @@ export default function TripDetail() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-[8px] font-bold uppercase tracking-widest opacity-40">
-                      <span>Paid: {formatCurrency(member.paid, activeTrip.currency)}</span>
-                      <span>Used: {formatCurrency(member.share, activeTrip.currency)}</span>
+                      <span>Paid: {formatCurrency(member.realPaid, activeTrip.currency)}</span>
+                      <span>Personal Use: {formatCurrency(member.realShare, activeTrip.currency)}</span>
                     </div>
+
+                    <AnimatePresence>
+                      {expandedMember === member.uid && (
+                        <motion.div 
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: 'auto' }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="overflow-hidden"
+                        >
+                          <div className="pt-3 mt-2 border-t border-white/10 space-y-2.5">
+                            <div className="flex justify-between text-[7px] font-bold uppercase tracking-widest opacity-30 mb-1">
+                              <span>Expense</span>
+                              <div className="flex gap-4">
+                                <span className="w-12 text-right">Paid</span>
+                                <span className="w-12 text-right">Used</span>
+                              </div>
+                            </div>
+                            {expenses.filter(exp => exp.category !== 'Settlement' && (exp.payerId === member.uid || (exp.participants || activeTrip.members || []).some((p: any) => (typeof p === 'string' ? p : (p.uid || p.id)) === member.uid))).map(exp => {
+                              const isPayer = exp.payerId === member.uid;
+                              const pts = exp.participants || activeTrip.members || [];
+                              const isParticipant = pts.some((p: any) => (typeof p === 'string' ? p : (p.uid || p.id)) === member.uid);
+                              const myShare = isParticipant ? exp.amount / (pts.length || 1) : 0;
+                              
+                              return (
+                                <div key={exp.id} className="flex justify-between items-center text-[10px]">
+                                  <span className="text-slate-300 truncate max-w-[100px]">{exp.description}</span>
+                                  <div className="flex gap-4 font-mono text-[9px]">
+                                    <span className={cn("w-12 text-right", isPayer ? "text-emerald-400" : "text-slate-600")}>
+                                      {isPayer ? `+${formatCurrency(exp.amount, activeTrip.currency)}` : '-'}
+                                    </span>
+                                    <span className={cn("w-12 text-right", isParticipant ? "text-red-400" : "text-slate-600")}>
+                                      {isParticipant ? `-${formatCurrency(myShare, activeTrip.currency)}` : '-'}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 ))}
               </div>
@@ -584,6 +791,34 @@ export default function TripDetail() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 pt-2">Receipt Image (Optional, max 1MB)</label>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center justify-center w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+                      <ImageIcon className="w-5 h-5" />
+                      <input 
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleImageUpload}
+                      />
+                    </label>
+                    {receiptImage && (
+                      <div className="relative group">
+                        <img src={receiptImage} alt="Receipt preview" className="h-12 w-12 object-cover rounded-xl border border-slate-200 dark:border-slate-700" />
+                        <button 
+                          type="button"
+                          onClick={() => setReceiptImage(null)}
+                          className="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full p-1 opacity-100 sm:opacity-0 group-hover:opacity-100 shadow-sm transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                    {!receiptImage && <span className="text-[10px] text-slate-400">Attach receipt</span>}
+                  </div>
+                </div>
                 
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 pt-2">Paid By</label>
@@ -784,6 +1019,34 @@ export default function TripDetail() {
           </div>
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {previewReceipt && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 w-full max-w-lg shadow-2xl relative"
+            >
+              <button 
+                onClick={() => setPreviewReceipt(null)}
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <h2 className="text-xl font-black mb-6 dark:text-white flex items-center gap-3">
+                <ImageIcon className="w-6 h-6 text-orange-500" />
+                Receipt
+              </h2>
+              <div className="flex justify-center w-full max-h-[60vh] overflow-auto rounded-xl">
+                <img src={previewReceipt} alt="Receipt" className="max-w-full object-contain rounded-xl" />
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
