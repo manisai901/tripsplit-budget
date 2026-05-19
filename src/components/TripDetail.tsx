@@ -170,7 +170,7 @@ export default function TripDetail() {
       participants,
       payerId: selectedPayerId,
       payerName: selectedPayerName,
-      receiptUrl: receiptImage || undefined
+      ...(receiptImage ? { receiptUrl: receiptImage } : {})
     });
     setIsAddingExpense(false);
     setSplitOption('all');
