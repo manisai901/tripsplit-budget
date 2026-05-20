@@ -291,24 +291,35 @@ export function TripProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const value = useMemo(() => ({ 
+    trips, 
+    activeTrip, 
+    expenses, 
+    checklist,
+    members,
+    loading,
+    indexErrorUrl,
+    isIndexBuilding,
+    setActiveTripId, 
+    createTrip, 
+    joinTrip,
+    addExpense,
+    addChecklistItem,
+    toggleChecklistItem,
+    removeMember
+  }), [
+    trips, 
+    activeTrip, 
+    expenses, 
+    checklist, 
+    members, 
+    loading, 
+    indexErrorUrl, 
+    isIndexBuilding
+  ]);
+
   return (
-    <TripContext.Provider value={{ 
-      trips, 
-      activeTrip, 
-      expenses, 
-      checklist,
-      members,
-      loading,
-      indexErrorUrl,
-      isIndexBuilding,
-      setActiveTripId, 
-      createTrip, 
-      joinTrip,
-      addExpense,
-      addChecklistItem,
-      toggleChecklistItem,
-      removeMember
-    }}>
+    <TripContext.Provider value={value}>
       {children}
     </TripContext.Provider>
   );

@@ -6,17 +6,25 @@
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TripProvider, useTrip } from './context/TripContext';
 import Header from './components/Header';
+import Footer from './components/Footer';
 import AuthScreen from './components/AuthScreen';
 import Dashboard from './components/Dashboard';
 import TripDetail from './components/TripDetail';
 import RouteProgressBar from './components/RouteProgressBar';
+import PrivacyPolicy from './components/pages/PrivacyPolicy';
+import About from './components/pages/About';
+import Contact from './components/pages/Contact';
+import TermsOfService from './components/pages/TermsOfService';
+import HelpCenter from './components/pages/HelpCenter';
 import { AnimatePresence, motion } from 'motion/react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 
 import { useEffect, useState } from 'react';
 
 function AppContent() {
   const { user, loading: authLoading } = useAuth();
-  const { activeTrip, loading: tripsLoading } = useTrip();
+  const { activeTrip } = useTrip();
+  const location = useLocation();
   const [theme, setTheme] = useState<'light' | 'dark'>(
     (localStorage.getItem('theme') as any) || 'light'
   );
@@ -30,13 +38,18 @@ function AppContent() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
+  // Scroll to top on route change or trip switch
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname, activeTrip?.id]);
+
   if (authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-slate-950 transition-colors">
         <motion.div 
           animate={{ scale: [1, 1.1, 1], rotate: [0, 360] }}
           transition={{ duration: 2, repeat: Infinity }}
-          className="w-12 h-12 border-4 border-brand-primary border-t-transparent rounded-full"
+          className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full"
         />
       </div>
     );
@@ -47,35 +60,24 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-screen relative">
+    <div className="min-h-screen relative flex flex-col">
       <RouteProgressBar />
       <Header theme={theme} setTheme={setTheme} />
       
-      <main className="animate-fade-in relative z-10">
-        <AnimatePresence mode="wait">
-          {activeTrip ? (
-            <motion.div
-              key="detail"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.3 }}
-            >
-              <TripDetail />
-            </motion.div>
-          ) : (
-            <motion.div
-              key="dashboard"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              transition={{ duration: 0.3 }}
-            >
-              <Dashboard />
-            </motion.div>
-          )}
-        </AnimatePresence>
+      <main className="animate-fade-in relative z-10 flex-grow">
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/trip/:tripId" element={<TripDetail />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/contact" element={<Contact />} />
+          <Route path="/terms" element={<TermsOfService />} />
+          <Route path="/help" element={<HelpCenter />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
+
+      <Footer />
 
       {/* Global Background Glows */}
       <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden bg-[#F9FAFB] dark:bg-slate-950 transition-colors">
@@ -88,11 +90,13 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <TripProvider>
-        <AppContent />
-      </TripProvider>
-    </AuthProvider>
+    <Router>
+      <AuthProvider>
+        <TripProvider>
+          <AppContent />
+        </TripProvider>
+      </AuthProvider>
+    </Router>
   );
 }
 

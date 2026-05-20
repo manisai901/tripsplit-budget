@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { logout } from '../lib/firebase';
 import { cn } from '../lib/utils';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 interface HeaderProps {
   theme: 'light' | 'dark';
@@ -26,8 +27,8 @@ export default function Header({ theme, setTheme }: HeaderProps) {
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 h-14 md:h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 flex items-center justify-between px-4 md:px-8 transition-colors">
-      <div className="flex items-center gap-2 md:gap-3">
-        <div className="w-7 h-7 md:w-8 md:h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+      <Link to="/" className="flex items-center gap-2 md:gap-3 group">
+        <div className="w-7 h-7 md:w-8 md:h-8 bg-orange-500 rounded-lg flex items-center justify-center group-hover:rotate-12 transition-transform">
           <Plane className="text-white w-4 h-4 md:w-5 md:h-5" />
         </div>
         <div className="flex flex-col">
@@ -36,7 +37,7 @@ export default function Header({ theme, setTheme }: HeaderProps) {
             {user ? 'My Journeys' : 'Trip Explorer'}
           </span>
         </div>
-      </div>
+      </Link>
 
       <div className="flex items-center gap-2 md:gap-4">
         {/* Theme Toggle */}

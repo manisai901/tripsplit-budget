@@ -5,12 +5,21 @@ import {
 import { useTrip } from '../context/TripContext';
 import { formatDate, formatCurrency, cn, formatDateTime, formatTime } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { useState, useMemo, FormEvent } from 'react';
+import { useState, useMemo, FormEvent, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useParams, useNavigate } from 'react-router-dom';
 
 export default function TripDetail() {
   const { user } = useAuth();
-  const { activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, setActiveTripId } = useTrip();
+  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, setActiveTripId, loading } = useTrip();
+  const { tripId } = useParams();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (tripId && (!activeTrip || activeTrip.id !== tripId)) {
+      setActiveTripId(tripId);
+    }
+  }, [tripId, activeTrip?.id, setActiveTripId]);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [isManagingAccess, setIsManagingAccess] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -170,6 +179,7 @@ export default function TripDetail() {
       participants,
       payerId: selectedPayerId,
       payerName: selectedPayerName,
+      createdByName: user?.displayName || 'Unknown',
       ...(receiptImage ? { receiptUrl: receiptImage } : {})
     });
     setIsAddingExpense(false);
@@ -200,14 +210,42 @@ export default function TripDetail() {
     await removeMember(activeTrip.id, memberId);
   };
 
-  if (!activeTrip) return null;
+  if (loading || (!activeTrip && trips.length > 0)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-slate-950 transition-colors">
+        <motion.div 
+          animate={{ scale: [1, 1.1, 1], rotate: [0, 360] }}
+          transition={{ duration: 2, repeat: Infinity }}
+          className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full"
+        />
+      </div>
+    );
+  }
+
+  if (!activeTrip) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-white dark:bg-slate-950 transition-colors px-4 text-center">
+        <div className="w-20 h-20 bg-slate-100 dark:bg-slate-800 rounded-3xl flex items-center justify-center mb-6 text-slate-400">
+          <Plane className="w-10 h-10" />
+        </div>
+        <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Trip Not Found</h2>
+        <p className="text-slate-500 mb-8 max-w-xs">We couldn't find the journey you're looking for. It may have been deleted or you don't have access.</p>
+        <button 
+          onClick={() => navigate('/')}
+          className="h-12 px-8 bg-orange-500 text-white font-bold rounded-xl shadow-lg hover:bg-orange-600 transition-all active:scale-95"
+        >
+          Return to Dashboard
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 md:px-6 py-20 md:py-24 min-h-screen">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+    <div className="max-w-7xl mx-auto px-4 md:px-6 pt-20 md:pt-24 min-h-screen">
+      <div className="sticky top-[56px] md:top-[64px] z-30 bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-md -mx-4 md:-mx-6 px-4 md:px-6 py-4 mb-4 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors">
         <button 
-          onClick={() => setActiveTripId(null)}
-          className="flex items-center gap-2 text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors group self-start"
+          onClick={() => navigate('/')}
+          className="flex items-center gap-2 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group self-start"
         >
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
           <span className="font-bold uppercase tracking-[0.2em] text-[9px] md:text-[10px]">Back to Dashboard</span>
@@ -525,9 +563,12 @@ export default function TripDetail() {
                             </button>
                           )}
                         </h5>
-                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
                           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                            By {expense.payerName || 'Member'} &bull; {formatDate(expense.date)}
+                            Paid by <span className="text-slate-600 dark:text-slate-300">{expense.payerName || 'Member'}</span> &bull; {formatDate(expense.date)}
+                            {expense.createdByName && expense.createdByName !== expense.payerName && (
+                              <span className="ml-2 opacity-60 italic normal-case font-medium">Logged by {expense.createdByName}</span>
+                            )}
                           </p>
                           <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 text-[9px] font-bold uppercase tracking-widest">
                             {expense.category}
@@ -968,6 +1009,15 @@ export default function TripDetail() {
                     <div className="flex-1 h-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 flex items-center overflow-hidden">
                       <span className="text-xs font-mono text-slate-600 dark:text-slate-400 truncate">{activeTrip.id}</span>
                     </div>
+                    <button 
+                      onClick={() => {
+                        setIsManagingAccess(false);
+                        navigate('/');
+                      }}
+                      className="h-12 px-6 flex items-center justify-center bg-slate-900 dark:bg-orange-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+                    >
+                      Dashboard
+                    </button>
                     <button 
                       onClick={copyTripId}
                       className="h-12 w-12 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl hover:bg-orange-50 dark:hover:bg-orange-950 transition-colors group"
