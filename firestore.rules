@@ -73,14 +73,18 @@ service cloud.firestore {
     // Trips
     match /trips/{tripId} {
       // allow get: checked by isMemberOfTrip or simpler:
-      allow get: if isSignedIn() && (request.auth.uid in resource.data.members);
+      allow get: if isSignedIn() && (request.auth.uid in resource.data.members || request.auth.uid != null); // Allow fetching to join
       allow list: if isSignedIn() && (request.auth.uid in resource.data.members);
       allow create: if isSignedIn() && isEmailVerified() && isValidId(tripId) && isValidTrip(incoming());
-      allow update: if isSignedIn() && (request.auth.uid == existing().ownerId) && 
-                      isValidTrip(incoming()) && 
-                      incoming().ownerId == existing().ownerId &&
-                      incoming().createdAt == existing().createdAt &&
-                      incoming().diff(existing()).affectedKeys().hasOnly(['name', 'destination', 'startDate', 'endDate', 'budget', 'currency', 'updatedAt', 'members']);
+      allow update: if isSignedIn() && (
+                        (request.auth.uid == existing().ownerId && 
+                         isValidTrip(incoming()) && 
+                         incoming().ownerId == existing().ownerId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'destination', 'startDate', 'endDate', 'budget', 'currency', 'updatedAt', 'members']))
+                        ||
+                        (request.auth.uid != null && incoming().diff(existing()).affectedKeys().hasOnly(['members', 'updatedAt']))
+                      );
       allow delete: if isSignedIn() && (request.auth.uid == existing().ownerId);
 
       // Members Subcollection (for detailed profiles)

@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { TripProvider, useTrip } from './context/TripContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
+import MobileNav from './components/MobileNav';
 import AuthScreen from './components/AuthScreen';
 import Dashboard from './components/Dashboard';
 import TripDetail from './components/TripDetail';
@@ -18,6 +19,7 @@ import TermsOfService from './components/pages/TermsOfService';
 import HelpCenter from './components/pages/HelpCenter';
 import { AnimatePresence, motion } from 'motion/react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Toaster } from 'sonner';
 
 import { useEffect, useState } from 'react';
 
@@ -56,15 +58,21 @@ function AppContent() {
   }
 
   if (!user) {
-    return <AuthScreen theme={theme} setTheme={setTheme} />;
+    return (
+      <>
+        <Toaster theme={theme} position="top-center" />
+        <AuthScreen theme={theme} setTheme={setTheme} />
+      </>
+    );
   }
 
   return (
     <div className="min-h-screen relative flex flex-col">
+      <Toaster theme={theme} position="top-center" />
       <RouteProgressBar />
       <Header theme={theme} setTheme={setTheme} />
       
-      <main className="animate-fade-in relative z-10 flex-grow">
+      <main className="animate-fade-in relative z-10 flex-grow pb-24 md:pb-0">
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/trip/:tripId" element={<TripDetail />} />
@@ -78,6 +86,7 @@ function AppContent() {
       </main>
 
       <Footer />
+      <MobileNav />
 
       {/* Global Background Glows */}
       <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden bg-[#F9FAFB] dark:bg-slate-950 transition-colors">

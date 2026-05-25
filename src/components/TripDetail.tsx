@@ -1,13 +1,15 @@
 import { 
-  ArrowLeft, Plus, DollarSign, PieChart, Users, Receipt, 
-  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon
+  ArrowLeft, Plus, DollarSign, PieChart as PieChartIcon, Users, Receipt, 
+  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download
 } from 'lucide-react';
+import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useTrip } from '../context/TripContext';
 import { formatDate, formatCurrency, cn, formatDateTime, formatTime } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useMemo, FormEvent, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useParams, useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
 
 export default function TripDetail() {
   const { user } = useAuth();
@@ -61,6 +63,24 @@ export default function TripDetail() {
       .filter(exp => exp.category !== 'Settlement')
       .reduce((sum, exp) => sum + exp.amount, 0), 
   [expenses]);
+
+  const categoryChartData = useMemo(() => {
+    const data: Record<string, number> = {};
+    expenses.filter(exp => exp.category !== 'Settlement').forEach(exp => {
+      data[exp.category] = (data[exp.category] || 0) + exp.amount;
+    });
+    return Object.entries(data).map(([name, value]) => ({ name, value }));
+  }, [expenses]);
+
+  const memberChartData = useMemo(() => {
+    const data: Record<string, number> = {};
+    expenses.filter(exp => exp.category !== 'Settlement').forEach(exp => {
+      data[exp.payerName] = (data[exp.payerName] || 0) + exp.amount;
+    });
+    return Object.entries(data).map(([name, value]) => ({ name, value }));
+  }, [expenses]);
+  
+  const COLORS = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#eab308', '#ec4899'];
 
   const settlementData = useMemo(() => {
     const data: Record<string, { paid: number; share: number; realPaid: number; realShare: number }> = {};
@@ -198,10 +218,36 @@ export default function TripDetail() {
     setNewCheckTime('');
   };
 
+  const downloadCsv = () => {
+    if (!activeTrip || expenses.length === 0) return;
+    const headers = ['Date', 'Time', 'Category', 'Description', 'Amount', 'Currency', 'Payer', 'Participants'];
+    const rows = expenses.map(e => [
+      e.date,
+      e.time || '',
+      e.category,
+      e.description,
+      e.amount,
+      activeTrip.currency,
+      e.payerName,
+      e.participants.join('|')
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + [headers.join(','), ...rows.map(e => e.join(','))].join("\n");
+      
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `journey_${activeTrip.id}_export.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const copyTripId = () => {
     if (!activeTrip) return;
     navigator.clipboard.writeText(activeTrip.id);
     setCopied(true);
+    toast.success('Invite ID Copied! Send it to your friends.');
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -212,12 +258,29 @@ export default function TripDetail() {
 
   if (loading || (!activeTrip && trips.length > 0)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-slate-950 transition-colors">
+      <div className="max-w-7xl mx-auto px-4 md:px-6 pt-20 md:pt-24 min-h-screen">
         <motion.div 
-          animate={{ scale: [1, 1.1, 1], rotate: [0, 360] }}
-          transition={{ duration: 2, repeat: Infinity }}
-          className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full"
-        />
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
+          className="space-y-8"
+        >
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+            <div className="w-32 h-6 bg-slate-200 dark:bg-slate-800 rounded-lg animate-pulse" />
+            <div className="w-10 h-10 bg-slate-200 dark:bg-slate-800 rounded-full animate-pulse" />
+          </div>
+          <div className="w-3/4 h-12 bg-slate-200 dark:bg-slate-800 rounded-xl animate-pulse" />
+          <div className="flex gap-4">
+             <div className="w-32 h-6 bg-slate-200 dark:bg-slate-800 rounded-lg animate-pulse" />
+             <div className="w-48 h-6 bg-slate-200 dark:bg-slate-800 rounded-lg animate-pulse" />
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+             {[1,2,3,4].map(i => <div key={i} className="w-full h-24 bg-slate-200 dark:bg-slate-800 rounded-2xl animate-pulse" />)}
+          </div>
+          <div className="flex gap-4 mt-8">
+             <div className="w-full h-64 bg-slate-200 dark:bg-slate-800 rounded-2xl animate-pulse" />
+          </div>
+        </motion.div>
       </div>
     );
   }
@@ -248,16 +311,18 @@ export default function TripDetail() {
           className="flex items-center gap-2 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group self-start"
         >
           <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-          <span className="font-bold uppercase tracking-[0.2em] text-[9px] md:text-[10px]">Back to Dashboard</span>
+          <span className="font-bold uppercase tracking-[0.2em] text-[10px] md:text-[10px]">Back</span>
         </button>
 
-        <button 
-          onClick={copyTripId}
-          className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-full text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:text-slate-900 dark:hover:text-white transition-all shadow-sm active:scale-95"
-        >
-          {copied ? <Check className="w-3 h-3 text-green-500" /> : <Share2 className="w-3 h-3" />}
-          {copied ? 'Copied ID' : 'Invite Travelers'}
-        </button>
+        <div className="flex items-center gap-2">
+           <button 
+             onClick={copyTripId}
+             className="flex items-center gap-2 px-4 py-2 bg-slate-900 dark:bg-orange-500 text-white rounded-full text-[10px] font-bold uppercase tracking-widest transition-all shadow-sm active:scale-95 hover:scale-[1.02]"
+           >
+             {copied ? <Check className="w-3 h-3 text-green-300" /> : <Share2 className="w-3 h-3" />}
+             {copied ? 'Copied ID' : 'Invite Travelers'}
+           </button>
+        </div>
       </div>
 
       {/* Header Stat Card */}
@@ -285,9 +350,26 @@ export default function TripDetail() {
                   <motion.div 
                     initial={{ width: 0 }}
                     animate={{ width: `${progressPercent}%` }}
-                    className="h-full bg-white shadow-[0_0_15px_rgba(255,255,255,0.7)]"
+                    className={cn(
+                      "h-full shadow-[0_0_15px_rgba(255,255,255,0.7)]",
+                      progressPercent >= 90 ? "bg-red-500" : progressPercent >= 80 ? "bg-yellow-400" : "bg-white"
+                    )}
                   />
                 </div>
+                <AnimatePresence>
+                  {progressPercent >= 80 && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center gap-3 backdrop-blur-md"
+                    >
+                      <AlertTriangle className="w-4 h-4 text-red-200" />
+                      <p className="text-[10px] font-bold text-red-100 uppercase tracking-widest">
+                        {progressPercent >= 100 ? "Budget exceeded" : "Approaching budget limit"}
+                      </p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
             <Plane className="absolute right-[-10%] bottom-[-10%] w-48 h-48 md:w-64 md:h-64 opacity-10 -rotate-12 pointer-events-none" />
@@ -315,10 +397,77 @@ export default function TripDetail() {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-8">
-        {/* Collaborative Checklist Section */}
+      {/* Analytics Charts Section */}
+      <div className="grid lg:grid-cols-12 gap-8 mb-8">
         <div className="lg:col-span-12">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden p-6 md:p-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 overflow-hidden">
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Category Spending</h4>
+                <div className="h-48 w-full -ml-[10px]">
+                  {categoryChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={categoryChartData}
+                          dataKey="value"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          outerRadius={80}
+                          innerRadius={50}
+                          paddingAngle={2}
+                          stroke="none"
+                        >
+                          {categoryChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip 
+                          formatter={(value: number) => formatCurrency(value, activeTrip.currency)}
+                          contentStyle={{ borderRadius: '12px', border: 'none', background: '#1e293b', color: '#fff', fontSize: '12px' }}
+                          itemStyle={{ color: '#fff' }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-xs text-slate-400">No data</div>
+                  )}
+                </div>
+             </div>
+             <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm p-6 overflow-hidden">
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Member Contributions</h4>
+                <div className="h-48 w-full -ml-4">
+                   {memberChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={memberChartData} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
+                        <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={10} tickMargin={10} stroke="#94a3b8" />
+                        <YAxis hide />
+                        <RechartsTooltip 
+                          formatter={(value: number) => formatCurrency(value, activeTrip.currency)}
+                          cursor={{ fill: 'transparent' }}
+                          contentStyle={{ borderRadius: '12px', border: 'none', background: '#1e293b', color: '#fff', fontSize: '12px' }}
+                          itemStyle={{ color: '#fff' }}
+                        />
+                        <Bar dataKey="value" fill="#f97316" radius={[4, 4, 0, 0]}>
+                           {memberChartData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[(index + 1) % COLORS.length]} />
+                           ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-xs text-slate-400">No data</div>
+                  )}
+                </div>
+             </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-12 gap-8 mb-8">
+        {/* Collaborative Checklist Section */}
+        <div className="lg:col-span-8">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden p-6 md:p-8 h-full">
             <div className="flex items-center justify-between mb-8">
               <div>
                 <h4 className="text-lg font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -355,7 +504,7 @@ export default function TripDetail() {
               </button>
             </form>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2">
               <AnimatePresence>
                 {checklist.map((item) => (
                   <motion.div
@@ -410,6 +559,29 @@ export default function TripDetail() {
           </div>
         </div>
 
+        {/* Live Activity Feed Component inline mapping */}
+        <div className="lg:col-span-4">
+           <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden p-6 md:p-8 h-full flex flex-col">
+              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-4">Live Activity</h4>
+              <div className="flex-grow overflow-y-auto space-y-4 pr-2">
+                 {expenses.slice(0, 5).map(exp => (
+                    <div key={exp.id} className="flex gap-3">
+                       <img src={members.find(m => m.uid === exp.payerId)?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${exp.payerId}`} alt="" className="w-8 h-8 rounded-full bg-slate-100" />
+                       <div>
+                          <p className="text-xs text-slate-700 dark:text-slate-300">
+                             <strong>{exp.payerName}</strong> added <strong className="text-orange-500">{formatCurrency(exp.amount, activeTrip.currency)}</strong> for {exp.category.toLowerCase()}
+                          </p>
+                          <p className="text-[10px] text-slate-400">{formatDate(exp.date)} {exp.time ? exp.time : ''}</p>
+                       </div>
+                    </div>
+                 ))}
+                 {expenses.length === 0 && <p className="text-xs text-slate-400 text-center py-10">No activity yet.</p>}
+              </div>
+           </div>
+        </div>
+      </div>
+
+      <div className="grid lg:grid-cols-12 gap-8">
         {/* Expenses Table Section */}
         <div className="lg:col-span-8">
           <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden h-full flex flex-col">
@@ -564,8 +736,18 @@ export default function TripDetail() {
                           )}
                         </h5>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/80 px-2 py-1 rounded-md">
+                            {members.find(m => m.uid === expense.payerId)?.photoURL ? (
+                               <img src={members.find(m => m.uid === expense.payerId)?.photoURL} alt={expense.payerName} className="w-4 h-4 rounded-full" />
+                            ) : (
+                               <div className="w-4 h-4 rounded-full bg-slate-300 dark:bg-slate-700 flex items-center justify-center shrink-0" />
+                            )}
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">
+                              <span className="text-slate-700 dark:text-slate-300">{expense.payerName || 'Member'}</span>
+                            </p>
+                          </div>
                           <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                            Paid by <span className="text-slate-600 dark:text-slate-300">{expense.payerName || 'Member'}</span> &bull; {formatDate(expense.date)}
+                            &bull; {formatDate(expense.date)}
                             {expense.createdByName && expense.createdByName !== expense.payerName && (
                               <span className="ml-2 opacity-60 italic normal-case font-medium">Logged by {expense.createdByName}</span>
                             )}

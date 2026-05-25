@@ -6,7 +6,7 @@ import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 export default function Dashboard() {
-  const { trips, createTrip, joinTrip, setActiveTripId, indexErrorUrl, isIndexBuilding } = useTrip();
+  const { trips, createTrip, joinTrip, setActiveTripId, indexErrorUrl, isIndexBuilding, loading } = useTrip();
   const navigate = useNavigate();
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
@@ -118,7 +118,32 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {trips.length === 0 ? (
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map((skeleton) => (
+            <motion.div
+              key={skeleton}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
+              className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col h-full min-h-[220px]"
+            >
+              <div className="p-6 flex flex-col h-full">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="w-10 h-10 rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                  <div className="w-16 h-8 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                </div>
+                <div className="w-3/4 h-6 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse mb-3" />
+                <div className="w-1/2 h-4 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse mb-6" />
+                <div className="mt-auto pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between">
+                  <div className="w-24 h-6 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                  <div className="w-16 h-4 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      ) : trips.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800">
           <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4">
             <MapPin className="w-8 h-8 text-slate-300 dark:text-slate-700" />

@@ -17,6 +17,7 @@ import {
 } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from './AuthContext';
+import { toast } from 'sonner';
 
 interface Trip {
   id: string;
@@ -195,8 +196,9 @@ export function TripProvider({ children }: { children: ReactNode }) {
         role: 'owner',
         joinedAt: serverTimestamp()
       });
-    } catch (error) {
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.WRITE, 'trips');
+      toast.error(error.message || 'Failed to create trip');
     }
   };
 
@@ -224,8 +226,10 @@ export function TripProvider({ children }: { children: ReactNode }) {
         });
       }
       setActiveTripId(tripId);
-    } catch (error) {
+      toast.success('Successfully joined trip!');
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/join`);
+      toast.error('Failed to join trip');
     }
   };
 
@@ -240,8 +244,10 @@ export function TripProvider({ children }: { children: ReactNode }) {
         createdAt: serverTimestamp(),
         time: data.time || null
       });
-    } catch (error) {
+      toast.success('Expense recorded successfully!');
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/expenses`);
+      toast.error('Failed to record expense');
     }
   };
 
@@ -256,8 +262,10 @@ export function TripProvider({ children }: { children: ReactNode }) {
         createdAt: serverTimestamp(),
         dueTime: dueTime || null
       });
-    } catch (error) {
+      toast.success('Task added successfully!');
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/checklist`);
+      toast.error('Failed to add task');
     }
   };
 
