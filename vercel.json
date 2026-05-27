@@ -1,0 +1,9 @@
+{
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/((?!api|sitemap\\.xml|ads\\.txt|google4ea9dde78a4af134\\.html|assets).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

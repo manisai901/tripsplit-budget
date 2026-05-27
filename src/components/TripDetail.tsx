@@ -320,8 +320,19 @@ export default function TripDetail() {
              className="flex items-center gap-2 px-4 py-2 bg-slate-900 dark:bg-orange-500 text-white rounded-full text-[10px] font-bold uppercase tracking-widest transition-all shadow-sm active:scale-95 hover:scale-[1.02]"
            >
              {copied ? <Check className="w-3 h-3 text-green-300" /> : <Share2 className="w-3 h-3" />}
-             {copied ? 'Copied ID' : 'Invite Travelers'}
+             {copied ? 'Copied ID' : 'Invite'}
            </button>
+           <a 
+             href={`https://wa.me/?text=${encodeURIComponent(`Hey! Join my trip *${activeTrip.name}* on *TripSplit Budget* to split our expenses and sync budgets in real time! ✈️💰\n\nTrip ID: *${activeTrip.id}*\n\nJoin here: https://tripsplit-budget.vercel.app`)}`}
+             target="_blank" 
+             rel="noopener noreferrer"
+             className="flex items-center gap-1.5 px-4 py-2 bg-[#25D366] hover:bg-[#20ba5a] text-white rounded-full text-[10px] font-bold uppercase tracking-widest transition-all shadow-sm active:scale-95 hover:scale-[1.02]"
+           >
+             <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+               <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.717-1.455L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.37 9.864-9.799.002-2.63-1.023-5.101-2.885-6.963C16.588 1.981 14.117.956 11.53.956 6.095.956 1.671 5.328 1.667 10.757c-.001 1.705.452 3.369 1.31 4.837l-.859 3.136 3.226-.834zm13.111-6.196c-.332-.166-1.966-.97-2.271-1.082-.306-.112-.529-.166-.75.166-.222.332-.857 1.082-1.051 1.302-.195.221-.39.248-.722.082-.332-.166-1.401-.516-2.668-1.646-.985-.88-1.65-1.968-1.843-2.3-.193-.332-.021-.511.144-.676.15-.148.332-.387.498-.581.166-.193.221-.332.332-.553.111-.221.055-.415-.027-.581-.082-.166-.75-1.804-1.026-2.47-.27-.648-.544-.56-.75-.571-.193-.01-.415-.011-.637-.011-.222 0-.582.082-.886.415-.304.331-1.162 1.135-1.162 2.766 0 1.631 1.189 3.208 1.355 3.429.166.221 2.341 3.58 5.672 5.016.792.341 1.41.545 1.892.699.796.253 1.52.217 2.093.131.638-.095 1.966-.803 2.242-1.58.277-.777.277-1.442.194-1.58-.083-.139-.304-.221-.636-.387z"/>
+             </svg>
+             <span>WhatsApp</span>
+           </a>
         </div>
       </div>
 
@@ -483,23 +494,23 @@ export default function TripDetail() {
               </div>
             </div>
 
-            <form onSubmit={handleAddCheckItem} className="flex flex-col md:flex-row gap-3 mb-8">
-              <div className="flex-1 flex flex-col sm:flex-row gap-2">
+            <form onSubmit={handleAddCheckItem} className="flex flex-col md:flex-row gap-3.5 mb-8">
+              <div className="flex-1 flex flex-col sm:flex-row gap-3">
                 <input 
                   type="text" 
                   placeholder="Add a mission objective..."
                   value={newCheckItem}
                   onChange={e => setNewCheckItem(e.target.value)}
-                  className="flex-1 h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-5 text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
+                  className="flex-1 h-14 md:h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-5 text-base md:text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
                 />
                 <input 
                   type="time" 
                   value={newCheckTime}
                   onChange={e => setNewCheckTime(e.target.value)}
-                  className="w-full sm:w-32 h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
+                  className="w-full sm:w-36 h-14 md:h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 text-base md:text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
                 />
               </div>
-              <button disabled={!newCheckItem} className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-8 h-12 rounded-xl text-xs font-bold uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
+              <button disabled={!newCheckItem} className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-8 h-14 md:h-12 rounded-xl text-sm md:text-xs font-bold uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
                 Add Objective
               </button>
             </form>
@@ -1187,25 +1198,39 @@ export default function TripDetail() {
               <div className="p-6">
                 <div className="mb-8 p-5 bg-orange-50 dark:bg-orange-500/5 rounded-2xl border border-orange-100 dark:border-orange-500/10">
                   <h4 className="text-[10px] font-bold text-orange-600 dark:text-orange-400 uppercase tracking-[0.2em] mb-4">Transmission Channel (Trip ID)</h4>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <div className="flex-1 h-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 flex items-center overflow-hidden">
                       <span className="text-xs font-mono text-slate-600 dark:text-slate-400 truncate">{activeTrip.id}</span>
                     </div>
-                    <button 
-                      onClick={() => {
-                        setIsManagingAccess(false);
-                        navigate('/');
-                      }}
-                      className="h-12 px-6 flex items-center justify-center bg-slate-900 dark:bg-orange-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all"
-                    >
-                      Dashboard
-                    </button>
-                    <button 
-                      onClick={copyTripId}
-                      className="h-12 w-12 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl hover:bg-orange-50 dark:hover:bg-orange-950 transition-colors group"
-                    >
-                      {copied ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5 text-slate-400 group-hover:text-orange-500" />}
-                    </button>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => {
+                          setIsManagingAccess(false);
+                          navigate('/');
+                        }}
+                        className="flex-1 sm:flex-none h-12 px-5 flex items-center justify-center bg-slate-900 dark:bg-orange-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all"
+                      >
+                        Dashboard
+                      </button>
+                      <button 
+                        onClick={copyTripId}
+                        title="Copy Trip ID"
+                        className="h-12 w-12 flex items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl hover:bg-orange-50 dark:hover:bg-orange-950 transition-colors group"
+                      >
+                        {copied ? <Check className="w-5 h-5 text-green-500" /> : <Copy className="w-5 h-5 text-slate-400 group-hover:text-orange-500" />}
+                      </button>
+                      <a 
+                        href={`https://wa.me/?text=${encodeURIComponent(`Hey! Join my trip *${activeTrip.name}* on *TripSplit Budget* to split our expenses and sync budgets in real time! ✈️💰\n\nTrip ID: *${activeTrip.id}*\n\nJoin here: https://tripsplit-budget.vercel.app`)}`}
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="flex-1 sm:flex-none h-12 px-5 flex items-center justify-center bg-[#25D366] hover:bg-[#20ba5a] text-white rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all gap-1.5"
+                      >
+                        <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
+                          <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946C.06 5.348 5.397.01 12.008.01c3.202.001 6.212 1.246 8.477 3.514 2.266 2.268 3.507 5.28 3.505 8.484-.004 6.657-5.34 11.997-11.953 11.997-2.005-.001-3.973-.502-5.717-1.455L0 24zm6.59-4.846c1.6.95 3.188 1.449 4.825 1.451 5.436 0 9.86-4.37 9.864-9.799.002-2.63-1.023-5.101-2.885-6.963C16.588 1.981 14.117.956 11.53.956 6.095.956 1.671 5.328 1.667 10.757c-.001 1.705.452 3.369 1.31 4.837l-.859 3.136 3.226-.834zm13.111-6.196c-.332-.166-1.966-.97-2.271-1.082-.306-.112-.529-.166-.75.166-.222.332-.857 1.082-1.051 1.302-.195.221-.39.248-.722.082-.332-.166-1.401-.516-2.668-1.646-.985-.88-1.65-1.968-1.843-2.3-.193-.332-.021-.511.144-.676.15-.148.332-.387.498-.581.166-.193.221-.332.332-.553.111-.221.055-.415-.027-.581-.082-.166-.75-1.804-1.026-2.47-.27-.648-.544-.56-.75-.571-.193-.01-.415-.011-.637-.011-.222 0-.582.082-.886.415-.304.331-1.162 1.135-1.162 2.766 0 1.631 1.189 3.208 1.355 3.429.166.221 2.341 3.58 5.672 5.016.792.341 1.41.545 1.892.699.796.253 1.52.217 2.093.131.638-.095 1.966-.803 2.242-1.58.277-.777.277-1.442.194-1.58-.083-.139-.304-.221-.636-.387z"/>
+                        </svg>
+                        <span>WhatsApp</span>
+                      </a>
+                    </div>
                   </div>
                   <p className="mt-3 text-[10px] text-orange-600/70 font-medium leading-relaxed">Share this ID with other nomads to have them join this trip's ledger system.</p>
                 </div>
