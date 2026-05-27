@@ -43,7 +43,7 @@ service cloud.firestore {
     function isValidMember(data) {
       return data.uid is string && data.uid.size() <= 128 &&
              data.email is string && data.email.size() <= 256 &&
-             data.role in ['owner', 'editor', 'viewer'] &&
+             data.role in ['owner', 'editor', 'viewer', 'pending'] &&
              data.joinedAt == request.time;
     }
 
@@ -115,7 +115,7 @@ service cloud.firestore {
         allow read: if isMemberOfTrip(tripId);
         allow create: if isMemberOfTrip(tripId) && isValidId(itemId) && isValidChecklistItem(incoming());
         allow update: if isMemberOfTrip(tripId) && 
-                        incoming().diff(existing()).affectedKeys().hasOnly(['completed', 'text', 'completedAt']);
+                        incoming().diff(existing()).affectedKeys().hasOnly(['completed', 'text', 'dueTime', 'modifiedCount', 'completedAt']);
         allow delete: if isMemberOfTrip(tripId);
       }
 

@@ -13,9 +13,18 @@ import { toast } from 'sonner';
 
 export default function TripDetail() {
   const { user } = useAuth();
-  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, setActiveTripId, loading } = useTrip();
+  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, updateChecklistItem, setActiveTripId, loading } = useTrip();
   const { tripId } = useParams();
   const navigate = useNavigate();
+
+  const approvedMembers = useMemo(() => members.filter(m => m.role !== 'pending'), [members]);
+  const pendingMembers = useMemo(() => members.filter(m => m.role === 'pending'), [members]);
+  const currentUserMember = useMemo(() => members.find(m => m.uid === user?.uid), [members, user]);
+  const isPending = currentUserMember?.role === 'pending';
+
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState('');
+  const [editingDueTime, setEditingDueTime] = useState('');
 
   useEffect(() => {
     if (tripId && (!activeTrip || activeTrip.id !== tripId)) {
@@ -86,7 +95,7 @@ export default function TripDetail() {
     const data: Record<string, { paid: number; share: number; realPaid: number; realShare: number }> = {};
     
     // Initialize
-    members.forEach(m => {
+    approvedMembers.forEach(m => {
       data[m.uid] = { paid: 0, share: 0, realPaid: 0, realShare: 0 };
     });
 
@@ -112,7 +121,7 @@ export default function TripDetail() {
       });
     });
 
-    return members.map(m => ({
+    return approvedMembers.map(m => ({
       ...m,
       paid: data[m.uid]?.paid || 0,
       share: data[m.uid]?.share || 0,
@@ -120,7 +129,7 @@ export default function TripDetail() {
       realShare: data[m.uid]?.realShare || 0,
       balance: (data[m.uid]?.paid || 0) - (data[m.uid]?.share || 0)
     }));
-  }, [members, expenses]);
+  }, [approvedMembers, expenses]);
 
   const explicitDebts = useMemo(() => {
     const sortedData = [...settlementData];
@@ -336,6 +345,18 @@ export default function TripDetail() {
         </div>
       </div>
 
+      {isPending && (
+        <div className="bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-400 p-4 rounded-2xl flex items-start gap-4 mb-8">
+          <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500 animate-pulse mt-0.5" />
+          <div className="space-y-1 block">
+            <h4 className="text-xs font-bold uppercase tracking-wider">Join Request Pending</h4>
+            <p className="text-[11px] leading-relaxed opacity-90 font-medium">
+              You are waiting for the Trip Leader to confirm your participation. You can view trip details as read-only. Standard features will unlock once approved.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header Stat Card */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8">
         <div className="lg:col-span-8">
@@ -397,11 +418,11 @@ export default function TripDetail() {
               </div>
               <div className="p-3 bg-amber-50 dark:bg-amber-900/10 rounded-xl flex items-center justify-between border border-amber-100/50 dark:border-amber-800/30">
                 <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase">Expedition Size</span>
-                <span className="text-sm font-bold text-amber-900 dark:text-amber-200">{members.length} Members</span>
+                <span className="text-sm font-bold text-amber-900 dark:text-amber-200">{approvedMembers.length} Members</span>
               </div>
               <div className="p-3 bg-purple-50 dark:bg-purple-900/10 rounded-xl flex items-center justify-between border border-purple-100/50 dark:border-purple-800/30">
                 <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold uppercase">Parity Share</span>
-                <span className="text-sm font-bold text-purple-900 dark:text-purple-200">{formatCurrency(totalSpent / (members.length || 1), activeTrip.currency)}</span>
+                <span className="text-sm font-bold text-purple-900 dark:text-purple-200">{formatCurrency(totalSpent / (approvedMembers.length || 1), activeTrip.currency)}</span>
               </div>
             </div>
           </div>
@@ -498,73 +519,152 @@ export default function TripDetail() {
               <div className="flex-1 flex flex-col sm:flex-row gap-3">
                 <input 
                   type="text" 
-                  placeholder="Add a mission objective..."
+                  placeholder={isPending ? "Pending Leader confirmation..." : "Add a mission objective..."}
                   value={newCheckItem}
+                  disabled={isPending}
                   onChange={e => setNewCheckItem(e.target.value)}
-                  className="flex-1 h-14 md:h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-5 text-base md:text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
+                  className="flex-1 h-14 md:h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-5 text-base md:text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white disabled:opacity-60"
                 />
                 <input 
                   type="time" 
                   value={newCheckTime}
+                  disabled={isPending}
                   onChange={e => setNewCheckTime(e.target.value)}
-                  className="w-full sm:w-36 h-14 md:h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 text-base md:text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
+                  className="w-full sm:w-36 h-14 md:h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 text-base md:text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white disabled:opacity-60"
                 />
               </div>
-              <button disabled={!newCheckItem} className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-8 h-14 md:h-12 rounded-xl text-sm md:text-xs font-bold uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
+              <button disabled={!newCheckItem || isPending} className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-8 h-14 md:h-12 rounded-xl text-sm md:text-xs font-bold uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
                 Add Objective
               </button>
             </form>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 ml-1 font-bold tracking-wide -mt-6 mb-8 block select-none">
+              *(You only have one chance to modify this objective later)
+            </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2">
               <AnimatePresence>
-                {checklist.map((item) => (
-                  <motion.div
-                    key={item.id}
-                    layout
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className={cn(
-                      "group p-4 rounded-2xl border transition-all cursor-pointer",
-                      item.completed 
-                        ? "bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 opacity-60" 
-                        : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-200 dark:hover:border-emerald-900/50"
-                    )}
-                    onClick={() => toggleChecklistItem(activeTrip.id, item.id, !item.completed)}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 pointer-events-none">
-                        {item.completed ? (
-                          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-                        ) : (
-                          <Circle className="w-5 h-5 text-slate-300 dark:text-slate-700 group-hover:text-emerald-500" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0 pointer-events-none">
-                        <p className={cn("text-xs font-bold leading-tight line-clamp-2 transition-all", item.completed && "line-through text-slate-400")}>
-                          {item.text}
-                          {item.dueTime && (
-                            <span className="ml-2 px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded text-[9px] font-mono no-underline inline-block">
-                              {item.dueTime}
-                            </span>
-                          )}
-                        </p>
-                        <div className="mt-2 flex flex-col gap-1">
-                          <div className="flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-widest text-slate-400">
-                            <Clock className="w-2.5 h-2.5" />
-                            {item.createdByName || 'Member'} @ {item.createdAt?.toDate ? formatDateTime(item.createdAt.toDate()) : 'Now'}
+                {checklist.map((item) => {
+                  const isEditing = editingItemId === item.id;
+                  return (
+                    <motion.div
+                      key={item.id}
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className={cn(
+                        "group p-4 rounded-2xl border transition-all",
+                        isEditing ? "bg-slate-50 dark:bg-slate-800 border-orange-500/50" : (
+                          item.completed 
+                            ? "bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800 opacity-60" 
+                            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-200 dark:hover:border-emerald-900/50 cursor-pointer"
+                        )
+                      )}
+                      onClick={() => {
+                        if (isEditing) return;
+                        if (isPending) {
+                          toast.error('You are pending leader confirmation');
+                          return;
+                        }
+                        toggleChecklistItem(activeTrip.id, item.id, !item.completed);
+                      }}
+                    >
+                      {isEditing ? (
+                        <div className="space-y-3 w-full" onClick={e => e.stopPropagation()}>
+                          <input 
+                            type="text" 
+                            value={editingText}
+                            onChange={e => setEditingText(e.target.value)}
+                            className="w-full h-10 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-3 text-xs outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white"
+                            placeholder="Modify objective..."
+                          />
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="time" 
+                              value={editingDueTime}
+                              onChange={e => setEditingDueTime(e.target.value)}
+                              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl px-2 h-9 text-xs outline-none dark:text-white flex-1"
+                            />
+                            <button 
+                              onClick={async () => {
+                                if (!editingText.trim()) return;
+                                await updateChecklistItem(activeTrip.id, item.id, editingText.trim(), editingDueTime);
+                                setEditingItemId(null);
+                              }}
+                              className="h-9 px-3 bg-slate-900 dark:bg-orange-500 text-white font-bold rounded-lg text-[10px] uppercase tracking-wider"
+                            >
+                              Save
+                            </button>
+                            <button 
+                              onClick={() => setEditingItemId(null)}
+                              className="h-9 px-3 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-lg text-[10px] uppercase tracking-wider font-bold"
+                            >
+                              Cancel
+                            </button>
                           </div>
-                          {item.completed && item.completedAt && (
-                            <div className="flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-500">
-                              <CheckCircle2 className="w-2.5 h-2.5" />
-                              Closed @ {formatDateTime(item.completedAt.toDate())}
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-3 justify-between h-full w-full">
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            <div className="mt-0.5 shrink-0">
+                              {item.completed ? (
+                                <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                              ) : (
+                                <Circle className="w-5 h-5 text-slate-300 dark:text-slate-700 group-hover:text-emerald-500" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className={cn("text-xs font-bold leading-tight break-words transition-all", item.completed && "line-through text-slate-400")}>
+                                {item.text}
+                                {item.dueTime && (
+                                  <span className="ml-2 px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded text-[9px] font-mono no-underline inline-block">
+                                    {item.dueTime}
+                                  </span>
+                                )}
+                              </p>
+                              <div className="mt-2 flex flex-col gap-1">
+                                <div className="flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-widest text-slate-400">
+                                  <Clock className="w-2.5 h-2.5" />
+                                  {item.createdByName || 'Member'} @ {item.createdAt?.toDate ? formatDateTime(item.createdAt.toDate()) : 'Now'}
+                                </div>
+                                {item.completed && item.completedAt && (
+                                  <div className="flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-500">
+                                    <CheckCircle2 className="w-2.5 h-2.5" />
+                                    Closed @ {formatDateTime(item.completedAt.toDate())}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* Option to modify: 1 time only if not completed and not pending and hasn't been modified yet */}
+                          {!item.completed && !isPending && (
+                            <div className="flex shrink-0 ml-2" onClick={e => e.stopPropagation()}>
+                              {(!item.modifiedCount || item.modifiedCount < 1) ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingItemId(item.id);
+                                    setEditingText(item.text);
+                                    setEditingDueTime(item.dueTime || '');
+                                  }}
+                                  className="p-1 px-2 text-[8px] bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold uppercase rounded border border-amber-500/20 transition-all align-middle"
+                                  title="Modify (1 chance only)"
+                                >
+                                  Modify
+                                </button>
+                              ) : (
+                                <span className="text-[7px] font-black uppercase tracking-wider text-slate-400 bg-slate-100 dark:bg-slate-800/85 px-1 py-0.5 rounded border border-slate-200/50 dark:border-slate-800/50 select-none align-middle">
+                                  Modified
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+                      )}
+                    </motion.div>
+                  );
+                })}
               </AnimatePresence>
             </div>
           </div>
@@ -789,12 +889,26 @@ export default function TripDetail() {
         <div className="lg:col-span-4 flex flex-col gap-6">
           {/* Detailed Members List */}
           <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6 border-b border-slate-100 dark:border-slate-800 pb-3">
               <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Members</h3>
-              <span className="text-[10px] font-bold text-orange-500 uppercase">{members.length} Online</span>
+              <span className="text-[10px] font-bold text-orange-500 uppercase">{approvedMembers.length} Approved</span>
             </div>
+
+            {isOwner && pendingMembers.length > 0 && (
+              <button 
+                onClick={() => setIsManagingAccess(true)}
+                className="w-full mb-5 p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 dark:border-amber-500/20 hover:bg-amber-500/15 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-amber-800 dark:text-amber-400 transition-all cursor-pointer animate-pulse"
+              >
+                <span className="flex items-center gap-1.5 align-middle select-none">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0 inline-block" />
+                  {pendingMembers.length} Request pending
+                </span>
+                <span className="text-orange-500 dark:text-amber-300">View Requests &rarr;</span>
+              </button>
+            )}
+
             <div className="space-y-5">
-              {members.map((member) => (
+              {approvedMembers.map((member) => (
                 <div key={member.uid} className="flex items-center justify-between group">
                   <div className="flex items-center gap-3">
                     <div className="relative">
@@ -1235,9 +1349,64 @@ export default function TripDetail() {
                   <p className="mt-3 text-[10px] text-orange-600/70 font-medium leading-relaxed">Share this ID with other nomads to have them join this trip's ledger system.</p>
                 </div>
 
+                {/* 1. Pending Requests (Only visible if there are some pending) */}
+                {pendingMembers.length > 0 && (
+                  <div className="space-y-2 mb-6 border-b border-slate-100 dark:border-slate-800 pb-6">
+                    <h4 className="text-[10px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2 select-none">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      Pending Join Requests ({pendingMembers.length})
+                    </h4>
+                    {pendingMembers.map(member => (
+                      <div key={member.uid} className="flex items-center justify-between p-3 rounded-2xl bg-amber-550/5 dark:bg-amber-500/5 hover:bg-amber-500/10 border border-amber-500/25 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <img 
+                            src={member.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${member.uid}`} 
+                            className="w-10 h-10 rounded-full border border-amber-200/50 dark:border-amber-900/30"
+                            referrerPolicy="no-referrer"
+                            alt=""
+                          />
+                          <div>
+                            <p className="text-sm font-bold dark:text-white flex items-center gap-1.5">{member.displayName}</p>
+                            <p className="text-[10px] text-slate-400 font-medium">{member.email}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isOwner ? (
+                            <>
+                              <button 
+                                onClick={async () => {
+                                  try {
+                                    await approveMember(activeTrip.id, member.uid);
+                                    toast.success(`${member.displayName || 'Member'} approved successfully!`);
+                                  } catch (err: any) {
+                                    toast.error(err.message || "Failed to approve member");
+                                  }
+                                }}
+                                className="h-8 px-3.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-bold text-[10px] uppercase tracking-wider transition-colors shadow-sm"
+                              >
+                                Approve
+                              </button>
+                              <button 
+                                onClick={() => handleRemoveMember(member.uid)}
+                                className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/15 rounded-lg transition-colors border border-transparent hover:border-red-500/20"
+                                title="Reject Request"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </>
+                          ) : (
+                            <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">Awaiting Approved</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* 2. Approved Members */}
                 <div className="space-y-2">
-                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Trip Members</h4>
-                  {members.map(member => (
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Approved Members ({approvedMembers.length})</h4>
+                  {approvedMembers.map(member => (
                     <div key={member.uid} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                       <div className="flex items-center gap-3">
                         <img 

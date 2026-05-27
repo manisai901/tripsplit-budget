@@ -50,6 +50,7 @@ interface ChecklistItem {
   createdAt: any;
   completedAt?: any;
   dueTime?: string;
+  modifiedCount?: number;
 }
 
 interface Expense {
@@ -84,6 +85,8 @@ interface TripContextType {
   addChecklistItem: (tripId: string, text: string, dueTime?: string) => Promise<void>;
   toggleChecklistItem: (tripId: string, itemId: string, completed: boolean) => Promise<void>;
   removeMember: (tripId: string, memberId: string) => Promise<void>;
+  approveMember: (tripId: string, memberId: string) => Promise<void>;
+  updateChecklistItem: (tripId: string, itemId: string, newText: string, newDueTime?: string) => Promise<void>;
 }
 
 const TripContext = createContext<TripContextType | undefined>(undefined);
@@ -221,7 +224,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
           email: user.email,
           displayName: user.displayName,
           photoURL: user.photoURL,
-          role: 'editor',
+          role: 'pending',
           joinedAt: serverTimestamp()
         });
       }
@@ -299,6 +302,46 @@ export function TripProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const approveMember = async (tripId: string, memberId: string) => {
+    if (!user || !activeTrip) return;
+    try {
+      if (activeTrip.ownerId !== user.uid) throw new Error('Only owners can approve members');
+
+      await updateDoc(doc(db, 'trips', tripId, 'members', memberId), {
+        role: 'editor'
+      });
+      toast.success('Traveler approved successfully!');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/members/${memberId}/approve`);
+      toast.error('Failed to approve member');
+    }
+  };
+
+  const updateChecklistItem = async (tripId: string, itemId: string, newText: string, newDueTime?: string) => {
+    try {
+      const itemRef = doc(db, 'trips', tripId, 'checklist', itemId);
+      const snapshot = await getDocFromServer(itemRef);
+      if (!snapshot.exists()) throw new Error('Objective not found');
+      const itemData = snapshot.data();
+      const currentModifiedCount = itemData.modifiedCount || 0;
+      
+      if (currentModifiedCount >= 1) {
+        toast.error('This objective has already been modified (only 1 edit allowed).');
+        return;
+      }
+
+      await updateDoc(itemRef, {
+        text: newText,
+        dueTime: newDueTime || null,
+        modifiedCount: currentModifiedCount + 1
+      });
+      toast.success('Objective modified successfully!');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.UPDATE, `trips/${tripId}/checklist/${itemId}`);
+      toast.error('Failed to modify objective');
+    }
+  };
+
   const value = useMemo(() => ({ 
     trips, 
     activeTrip, 
@@ -314,7 +357,9 @@ export function TripProvider({ children }: { children: ReactNode }) {
     addExpense,
     addChecklistItem,
     toggleChecklistItem,
-    removeMember
+    removeMember,
+    approveMember,
+    updateChecklistItem
   }), [
     trips, 
     activeTrip, 
