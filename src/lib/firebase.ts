@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, setPersistence, browserLocalPersistence } from 'firebase/auth';
 import { getFirestore, enableMultiTabIndexedDbPersistence, doc, getDocFromServer, setLogLevel } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -18,6 +18,12 @@ enableMultiTabIndexedDbPersistence(db).catch((err) => {
 });
 
 export const auth = getAuth(app);
+
+// Explicitly set persistence to guarantee robust reloads and session retention
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.warn('Error setting auth persistence, relying on defaults:', err);
+});
+
 export const googleProvider = new GoogleAuthProvider();
 
 export enum OperationType {

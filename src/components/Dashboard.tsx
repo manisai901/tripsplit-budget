@@ -4,6 +4,7 @@ import { formatDate, formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { UserAvatar } from './Avatar';
 
 export default function Dashboard() {
   const { trips, createTrip, joinTrip, setActiveTripId, indexErrorUrl, isIndexBuilding, loading } = useTrip();
@@ -198,8 +199,8 @@ export default function Dashboard() {
                     <div className="flex items-center gap-2">
                       <div className="flex -space-x-1.5">
                         {trip.members.slice(0, 3).map((uid, i) => (
-                          <div key={i} className="w-6 h-6 rounded-full border-2 border-white dark:border-slate-900 bg-slate-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden">
-                             <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${uid}`} alt="" className="w-full h-full" />
+                          <div key={i} className="w-6 h-6 rounded-full border-2 border-white dark:border-slate-900 overflow-hidden">
+                             <UserAvatar uid={uid} className="w-full h-full text-[6px]" />
                           </div>
                         ))}
                       </div>

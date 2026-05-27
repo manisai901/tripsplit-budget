@@ -2,9 +2,6 @@
   "cleanUrls": true,
   "rewrites": [
     {
-      "handle": "filesystem"
-    },
-    {
       "source": "/((?!api).*)",
       "destination": "/index.html"
     }

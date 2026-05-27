@@ -10,10 +10,13 @@ import { useState, useMemo, FormEvent, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { doc, getDocFromServer } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { UserAvatar } from './Avatar';
 
 export default function TripDetail() {
   const { user } = useAuth();
-  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, updateChecklistItem, setActiveTripId, loading } = useTrip();
+  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, updateChecklistItem, setActiveTripId, joinTrip, loading } = useTrip();
   const { tripId } = useParams();
   const navigate = useNavigate();
 
@@ -31,6 +34,41 @@ export default function TripDetail() {
       setActiveTripId(tripId);
     }
   }, [tripId, activeTrip?.id, setActiveTripId]);
+
+  const [directTrip, setDirectTrip] = useState<any>(null);
+  const [directLoading, setDirectLoading] = useState(false);
+  const [directError, setDirectError] = useState(false);
+  const [isJoiningDirect, setIsJoiningDirect] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const isAlreadyLoaded = trips.some(t => t.id === tripId);
+    
+    if (!loading && !activeTrip && tripId && user && !isAlreadyLoaded) {
+      setDirectLoading(true);
+      setDirectError(false);
+      const tripRef = doc(db, 'trips', tripId);
+      getDocFromServer(tripRef).then((snap) => {
+        if (!active) return;
+        if (snap.exists()) {
+          setDirectTrip({ id: snap.id, ...snap.data() });
+        } else {
+          setDirectError(true);
+        }
+        setDirectLoading(false);
+      }).catch((err) => {
+        if (!active) return;
+        console.error("Error fetching trip directly:", err);
+        setDirectError(true);
+        setDirectLoading(false);
+      });
+    } else {
+      setDirectTrip(null);
+    }
+    return () => {
+      active = false;
+    };
+  }, [loading, activeTrip, tripId, user, trips]);
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [isManagingAccess, setIsManagingAccess] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -265,7 +303,11 @@ export default function TripDetail() {
     await removeMember(activeTrip.id, memberId);
   };
 
-  if (loading || (!activeTrip && trips.length > 0)) {
+  const isTransitioning = useMemo(() => {
+    return trips.some(t => t.id === tripId) && !activeTrip;
+  }, [trips, tripId, activeTrip]);
+
+  if (loading || directLoading || isTransitioning) {
     return (
       <div className="max-w-7xl mx-auto px-4 md:px-6 pt-20 md:pt-24 min-h-screen">
         <motion.div 
@@ -288,6 +330,77 @@ export default function TripDetail() {
           </div>
           <div className="flex gap-4 mt-8">
              <div className="w-full h-64 bg-slate-200 dark:bg-slate-800 rounded-2xl animate-pulse" />
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (!activeTrip && directTrip) {
+    const handleJoinDirect = async () => {
+      try {
+        setIsJoiningDirect(true);
+        await joinTrip(directTrip.id);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsJoiningDirect(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 transition-colors p-6 text-center">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl p-8 md:p-10 shadow-2xl border border-slate-200 dark:border-slate-800"
+        >
+          <div className="w-16 h-16 bg-orange-500/10 dark:bg-orange-500/20 rounded-2xl flex items-center justify-center mb-6 mx-auto text-orange-500">
+            <Plane className="w-8 h-8" />
+          </div>
+          
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] mb-2 block animate-pulse">Adventure Shared Invitation</span>
+          <h2 className="text-2xl md:text-3xl font-black text-slate-900 dark:text-white mb-2 leading-tight">
+            Join "{directTrip.name}"
+          </h2>
+          
+          {directTrip.destination && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-full text-[11px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-6">
+              <MapPin className="w-3.5 h-3.5 text-orange-500" />
+              <span>{directTrip.destination}</span>
+            </div>
+          )}
+
+          <p className="text-sm text-slate-500 dark:text-slate-400 mb-8 leading-relaxed font-medium">
+            You've been invited to co-manage expenses, update checklists, and track spending budgets alongside colleagues and friends inside this trip.
+          </p>
+
+          <div className="space-y-3">
+            <button 
+              onClick={handleJoinDirect}
+              disabled={isJoiningDirect}
+              className="w-full h-12 bg-orange-500 text-white font-bold rounded-xl shadow-lg hover:bg-orange-600 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {isJoiningDirect ? (
+                <>
+                  <motion.div 
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                    className="w-4 h-4 border-2 border-white border-t-transparent rounded-full"
+                  />
+                  <span>Joining Expedition...</span>
+                </>
+              ) : (
+                <span>Accept Invite & Jump In</span>
+              )}
+            </button>
+            
+            <button 
+              onClick={() => navigate('/')}
+              className="w-full h-12 border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 font-bold rounded-xl transition-all"
+            >
+              Go to My Dashboard
+            </button>
           </div>
         </motion.div>
       </div>
@@ -677,7 +790,12 @@ export default function TripDetail() {
               <div className="flex-grow overflow-y-auto space-y-4 pr-2">
                  {expenses.slice(0, 5).map(exp => (
                     <div key={exp.id} className="flex gap-3">
-                       <img src={members.find(m => m.uid === exp.payerId)?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${exp.payerId}`} alt="" className="w-8 h-8 rounded-full bg-slate-100" />
+                       <UserAvatar 
+                         uid={exp.payerId} 
+                         displayName={exp.payerName}
+                         photoURL={members.find(m => m.uid === exp.payerId)?.photoURL} 
+                         className="w-8 h-8 font-bold text-[10px]"
+                       />
                        <div>
                           <p className="text-xs text-slate-700 dark:text-slate-300">
                              <strong>{exp.payerName}</strong> added <strong className="text-orange-500">{formatCurrency(exp.amount, activeTrip.currency)}</strong> for {exp.category.toLowerCase()}
@@ -912,11 +1030,11 @@ export default function TripDetail() {
                 <div key={member.uid} className="flex items-center justify-between group">
                   <div className="flex items-center gap-3">
                     <div className="relative">
-                      <img 
-                        src={member.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${member.uid}`} 
-                        className="w-10 h-10 rounded-full border-2 border-white dark:border-slate-800 shadow-sm"
-                        referrerPolicy="no-referrer"
-                        alt=""
+                      <UserAvatar 
+                        uid={member.uid}
+                        displayName={member.displayName}
+                        photoURL={member.photoURL}
+                        className="w-10 h-10 font-bold border-2 border-white dark:border-slate-800 shadow-sm"
                       />
                       <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full" />
                     </div>
@@ -962,10 +1080,11 @@ export default function TripDetail() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <img 
-                          src={member.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${member.uid}`} 
-                          className="w-5 h-5 rounded-full border border-white/10"
-                          alt=""
+                        <UserAvatar 
+                          uid={member.uid}
+                          displayName={member.displayName}
+                          photoURL={member.photoURL}
+                          className="w-5 h-5 text-[8px] border border-white/10"
                         />
                         <span className="text-[10px] font-bold truncate max-w-[80px]">{member.displayName}</span>
                       </div>
@@ -1359,11 +1478,11 @@ export default function TripDetail() {
                     {pendingMembers.map(member => (
                       <div key={member.uid} className="flex items-center justify-between p-3 rounded-2xl bg-amber-550/5 dark:bg-amber-500/5 hover:bg-amber-500/10 border border-amber-500/25 transition-colors">
                         <div className="flex items-center gap-3">
-                          <img 
-                            src={member.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${member.uid}`} 
-                            className="w-10 h-10 rounded-full border border-amber-200/50 dark:border-amber-900/30"
-                            referrerPolicy="no-referrer"
-                            alt=""
+                          <UserAvatar 
+                            uid={member.uid}
+                            displayName={member.displayName}
+                            photoURL={member.photoURL}
+                            className="w-10 h-10 font-bold border border-amber-200/50 dark:border-amber-900/30"
                           />
                           <div>
                             <p className="text-sm font-bold dark:text-white flex items-center gap-1.5">{member.displayName}</p>
@@ -1409,11 +1528,11 @@ export default function TripDetail() {
                   {approvedMembers.map(member => (
                     <div key={member.uid} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                       <div className="flex items-center gap-3">
-                        <img 
-                          src={member.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${member.uid}`} 
-                          className="w-10 h-10 rounded-full border border-slate-100 dark:border-slate-800"
-                          referrerPolicy="no-referrer"
-                          alt=""
+                        <UserAvatar 
+                          uid={member.uid}
+                          displayName={member.displayName}
+                          photoURL={member.photoURL}
+                          className="w-10 h-10 font-bold border border-slate-100 dark:border-slate-800"
                         />
                         <div>
                           <p className="text-sm font-bold dark:text-white">{member.displayName}</p>
