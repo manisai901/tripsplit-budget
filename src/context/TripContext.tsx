@@ -146,29 +146,33 @@ export function TripProvider({ children }: { children: ReactNode }) {
 
   // Sync expenses and checklist for active trip
   useEffect(() => {
-    if (!activeTripId || !user) {
-      setExpenses([]);
-      setChecklist([]);
-      setMembers([]);
+    // Only subscribe to subcollections when the user actually has access to the active trip.
+    // If the trips list is still loading, wait. If it loaded and the activeTrip is null, do not subscribe.
+    if (loading || !activeTrip || !user) {
+      if (!loading && !activeTrip) {
+        setExpenses([]);
+        setChecklist([]);
+        setMembers([]);
+      }
       return;
     }
 
     const expensesUnsub = onSnapshot(
-      query(collection(db, 'trips', activeTripId, 'expenses'), orderBy('createdAt', 'desc')),
+      query(collection(db, 'trips', activeTrip.id, 'expenses'), orderBy('createdAt', 'desc')),
       (snapshot) => setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `trips/${activeTripId}/expenses`)
+      (error) => handleFirestoreError(error, OperationType.LIST, `trips/${activeTrip.id}/expenses`)
     );
 
     const checklistUnsub = onSnapshot(
-      query(collection(db, 'trips', activeTripId, 'checklist'), orderBy('createdAt', 'asc')),
+      query(collection(db, 'trips', activeTrip.id, 'checklist'), orderBy('createdAt', 'asc')),
       (snapshot) => setChecklist(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChecklistItem))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `trips/${activeTripId}/checklist`)
+      (error) => handleFirestoreError(error, OperationType.LIST, `trips/${activeTrip.id}/checklist`)
     );
 
     const membersUnsub = onSnapshot(
-      collection(db, 'trips', activeTripId, 'members'),
+      collection(db, 'trips', activeTrip.id, 'members'),
       (snapshot) => setMembers(snapshot.docs.map(doc => ({ ...doc.data() } as Member))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `trips/${activeTripId}/members`)
+      (error) => handleFirestoreError(error, OperationType.LIST, `trips/${activeTrip.id}/members`)
     );
 
     return () => {
@@ -176,7 +180,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
       checklistUnsub();
       membersUnsub();
     };
-  }, [activeTripId, user]);
+  }, [activeTrip, loading, user]);
 
   const createTrip = async (data: Partial<Trip>) => {
     if (!user) return;
