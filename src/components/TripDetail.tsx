@@ -1,6 +1,6 @@
 import { 
   ArrowLeft, Plus, DollarSign, PieChart as PieChartIcon, Users, Receipt, 
-  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download
+  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download, QrCode
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useTrip } from '../context/TripContext';
@@ -13,10 +13,11 @@ import { toast } from 'sonner';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { UserAvatar } from './Avatar';
+import QRCode from 'qrcode';
 
 export default function TripDetail() {
   const { user } = useAuth();
-  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, updateChecklistItem, setActiveTripId, joinTrip, loading } = useTrip();
+  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, withdrawJoinRequest, updateChecklistItem, setActiveTripId, joinTrip, loading } = useTrip();
   const { tripId } = useParams();
   const navigate = useNavigate();
 
@@ -28,6 +29,7 @@ export default function TripDetail() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
   const [editingDueTime, setEditingDueTime] = useState('');
+  const [isConfirmingWithdraw, setIsConfirmingWithdraw] = useState(false);
 
   useEffect(() => {
     if (tripId && (!activeTrip || activeTrip.id !== tripId)) {
@@ -72,6 +74,24 @@ export default function TripDetail() {
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [isManagingAccess, setIsManagingAccess] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [qrUrl, setQrUrl] = useState('');
+  const [isShowingQRModal, setIsShowingQRModal] = useState(false);
+
+  useEffect(() => {
+    if (activeTrip?.id) {
+      const inviteUrl = `${window.location.origin}/trip/${activeTrip.id}`;
+      QRCode.toDataURL(inviteUrl, {
+        margin: 2,
+        width: 380,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff'
+        }
+      }).then(setQrUrl).catch(err => {
+        console.error("Error generating QR code:", err);
+      });
+    }
+  }, [activeTrip?.id]);
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
   const [splitOption, setSplitOption] = useState<'all' | 'custom'>('all');
   const [customParticipants, setCustomParticipants] = useState<string[]>([]);
@@ -438,6 +458,14 @@ export default function TripDetail() {
 
         <div className="flex items-center gap-2">
            <button 
+             onClick={() => setIsShowingQRModal(true)}
+             className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all shadow-sm active:scale-95 hover:scale-[1.02]"
+             title="Show QR Code Invite"
+           >
+             <QrCode className="w-3.5 h-3.5 text-orange-500" />
+             <span>Scan Invite</span>
+           </button>
+           <button 
              onClick={copyTripId}
              className="flex items-center gap-2 px-4 py-2 bg-slate-900 dark:bg-orange-500 text-white rounded-full text-[10px] font-bold uppercase tracking-widest transition-all shadow-sm active:scale-95 hover:scale-[1.02]"
            >
@@ -459,13 +487,46 @@ export default function TripDetail() {
       </div>
 
       {isPending && (
-        <div className="bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-400 p-4 rounded-2xl flex items-start gap-4 mb-8">
-          <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500 animate-pulse mt-0.5" />
-          <div className="space-y-1 block">
-            <h4 className="text-xs font-bold uppercase tracking-wider">Join Request Pending</h4>
-            <p className="text-[11px] leading-relaxed opacity-90 font-medium">
-              You are waiting for the Trip Leader to confirm your participation. You can view trip details as read-only. Standard features will unlock once approved.
-            </p>
+        <div className="bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-400 p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+          <div className="flex items-start gap-4">
+            <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500 animate-pulse mt-0.5" />
+            <div className="space-y-1 block">
+              <h4 className="text-xs font-bold uppercase tracking-wider">Join Request Pending</h4>
+              <p className="text-[11px] leading-relaxed opacity-90 font-medium">
+                You are waiting for the Trip Leader to confirm your participation. You can view trip details as read-only. Standard features will unlock once approved.
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center justify-end gap-2 w-full sm:w-auto">
+            {isConfirmingWithdraw ? (
+              <div className="flex items-center gap-1.5 bg-red-500/10 dark:bg-red-950/20 border border-red-500/30 p-1.5 rounded-xl">
+                <span className="text-[9px] font-bold text-red-500 uppercase tracking-widest pl-1">Confirm Exit?</span>
+                <button
+                  onClick={async () => {
+                    if (activeTrip) {
+                      await withdrawJoinRequest(activeTrip.id);
+                      navigate('/');
+                    }
+                  }}
+                  className="px-2.5 py-1.5 bg-red-500 hover:bg-red-650 text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition-all hover:scale-[1.02] active:scale-95"
+                >
+                  Yes, Exit
+                </button>
+                <button
+                  onClick={() => setIsConfirmingWithdraw(false)}
+                  className="px-2.5 py-1.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 text-slate-800 dark:text-slate-100 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsConfirmingWithdraw(true)}
+                className="px-4 py-2 bg-red-500 hover:bg-red-650 text-white font-bold rounded-xl text-[10px] uppercase tracking-widest transition-all shadow-sm active:scale-95 hover:scale-[1.02]"
+              >
+                Withdraw & Exit
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1036,7 +1097,11 @@ export default function TripDetail() {
                         photoURL={member.photoURL}
                         className="w-10 h-10 font-bold border-2 border-white dark:border-slate-800 shadow-sm"
                       />
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full" />
+                      {member.lastActive && (Date.now() - member.lastActive) < 40000 ? (
+                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.7)]" title="Active now" />
+                      ) : (
+                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-slate-300 dark:bg-slate-700 border-2 border-white dark:border-slate-900 rounded-full" title="Offline" />
+                      )}
                     </div>
                     <div className="flex flex-col">
                       <span className="text-xs font-bold text-slate-800 dark:text-white truncate max-w-[120px]">{member.displayName}</span>
@@ -1465,7 +1530,25 @@ export default function TripDetail() {
                       </a>
                     </div>
                   </div>
-                  <p className="mt-3 text-[10px] text-orange-600/70 font-medium leading-relaxed">Share this ID with other nomads to have them join this trip's ledger system.</p>
+                  <p className="mt-3 text-[10px] text-orange-600/70 font-medium leading-relaxed mb-4">Share this ID with other nomads to have them join this trip's ledger system.</p>
+                  
+                  {qrUrl && (
+                    <div className="mt-4 pt-4 border-t border-orange-100 dark:border-orange-500/10 flex flex-col items-center">
+                      <div className="bg-white p-3 rounded-2xl shadow-md border border-orange-100 max-w-[150px]">
+                        <img src={qrUrl} alt="Trip QR Code" className="w-[126px] h-auto select-none" />
+                      </div>
+                      <p className="text-[9px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-wider text-center mt-2.5">Point phone camera to join instantly</p>
+                      
+                      <a 
+                        href={qrUrl} 
+                        download={`tripsplit-qr-${activeTrip.name.toLowerCase().replace(/\s+/g, '-')}.png`}
+                        className="mt-2 text-[10px] font-bold uppercase tracking-wider text-orange-500 hover:text-orange-600 flex items-center gap-1.5 bg-orange-500/10 hover:bg-orange-500/20 px-4 py-2 rounded-full transition-all active:scale-95 shadow-sm"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download QR Image
+                      </a>
+                    </div>
+                  )}
                 </div>
 
                 {/* 1. Pending Requests (Only visible if there are some pending) */}
@@ -1528,12 +1611,19 @@ export default function TripDetail() {
                   {approvedMembers.map(member => (
                     <div key={member.uid} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
                       <div className="flex items-center gap-3">
-                        <UserAvatar 
-                          uid={member.uid}
-                          displayName={member.displayName}
-                          photoURL={member.photoURL}
-                          className="w-10 h-10 font-bold border border-slate-100 dark:border-slate-800"
-                        />
+                        <div className="relative">
+                          <UserAvatar 
+                            uid={member.uid}
+                            displayName={member.displayName}
+                            photoURL={member.photoURL}
+                            className="w-10 h-10 font-bold border border-slate-100 dark:border-slate-800"
+                          />
+                          {member.lastActive && (Date.now() - member.lastActive) < 40000 ? (
+                            <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.7)]" title="Active now" />
+                          ) : (
+                            <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-slate-300 dark:bg-slate-700 border-2 border-white dark:border-slate-900 rounded-full" title="Offline" />
+                          )}
+                        </div>
                         <div>
                           <p className="text-sm font-bold dark:text-white">{member.displayName}</p>
                           <p className="text-[10px] text-slate-400 font-medium">{member.email}</p>
@@ -1586,6 +1676,106 @@ export default function TripDetail() {
               </h2>
               <div className="flex justify-center w-full max-h-[60vh] overflow-auto rounded-xl">
                 <img src={previewReceipt} alt="Receipt" className="max-w-full object-contain rounded-xl" />
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* QR Code Invitation Modal */}
+      <AnimatePresence>
+        {isShowingQRModal && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
+              onClick={() => setIsShowingQRModal(false)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[32px] overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 text-center"
+            >
+              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/20">
+                <div className="text-left">
+                  <h2 className="text-base font-black dark:text-white flex items-center gap-2">
+                    <QrCode className="w-5 h-5 text-orange-500" />
+                    Trip Invitation
+                  </h2>
+                </div>
+                <button 
+                  onClick={() => setIsShowingQRModal(false)} 
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="p-6 md:p-8 flex flex-col items-center">
+                <span className="text-[9px] font-bold text-orange-500 uppercase tracking-[0.2em] mb-1">Instant Scan Core</span>
+                <h3 className="text-lg font-black text-slate-950 dark:text-white leading-snug mb-1">
+                  "{activeTrip.name}"
+                </h3>
+                {activeTrip.destination && (
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-slate-800 rounded-full text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-5">
+                    <MapPin className="w-3 h-3 text-orange-500" />
+                    <span>{activeTrip.destination}</span>
+                  </div>
+                )}
+
+                <div className="p-4 bg-white rounded-3xl shadow-lg border border-slate-100 dark:border-slate-800 md:max-w-[240px] flex items-center justify-center">
+                  {qrUrl ? (
+                    <img 
+                      src={qrUrl} 
+                      alt="Trip Invite QR Code" 
+                      className="w-full h-auto select-none rounded-xl"
+                    />
+                  ) : (
+                    <div className="w-48 h-48 flex items-center justify-center">
+                      <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+                </div>
+
+                <p className="mt-4 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest text-center">
+                  Scan to Join Ledger
+                </p>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-[260px] text-center mb-6">
+                  Point any smartphone camera at this code to join splits and verify expenses instantly.
+                </p>
+
+                <div className="w-full space-y-2">
+                  {qrUrl && (
+                    <a 
+                      href={qrUrl} 
+                      download={`tripsplit-qr-${activeTrip.name.toLowerCase().replace(/\s+/g, '-')}.png`}
+                      className="w-full h-11 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 text-xs uppercase tracking-wider"
+                    >
+                      <Download className="w-4 h-4" />
+                      Save QR Image
+                    </a>
+                  )}
+
+                  <button 
+                    onClick={copyTripId}
+                    className="w-full h-11 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-850 font-bold rounded-xl transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-2"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-4 h-4 text-green-500" />
+                        Copied Trip ID!
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        Copy Trip ID instead
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

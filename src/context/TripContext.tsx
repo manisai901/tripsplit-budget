@@ -13,13 +13,14 @@ import {
   deleteDoc,
   serverTimestamp,
   arrayUnion,
+  arrayRemove,
   getDocFromServer
 } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from './AuthContext';
 import { toast } from 'sonner';
 
-interface Trip {
+export interface Trip {
   id: string;
   name: string;
   destination: string;
@@ -39,6 +40,7 @@ interface Member {
   photoURL: string;
   role: string;
   joinedAt: any;
+  lastActive?: number;
 }
 
 interface ChecklistItem {
@@ -86,6 +88,7 @@ interface TripContextType {
   toggleChecklistItem: (tripId: string, itemId: string, completed: boolean) => Promise<void>;
   removeMember: (tripId: string, memberId: string) => Promise<void>;
   approveMember: (tripId: string, memberId: string) => Promise<void>;
+  withdrawJoinRequest: (tripId: string) => Promise<void>;
   updateChecklistItem: (tripId: string, itemId: string, newText: string, newDueTime?: string) => Promise<void>;
 }
 
@@ -181,6 +184,34 @@ export function TripProvider({ children }: { children: ReactNode }) {
       membersUnsub();
     };
   }, [activeTrip, loading, user]);
+
+  // Presence Heartbeat Loop (Firestore Heartbeats)
+  useEffect(() => {
+    if (!activeTrip || !user) return;
+
+    // Ensure the current user has access/membership on this trip to avoid permission rejected warnings
+    const isUserMember = activeTrip.members?.includes(user.uid);
+    if (!isUserMember) return;
+
+    const sendHeartbeat = async () => {
+      try {
+        const memberRef = doc(db, 'trips', activeTrip.id, 'members', user.uid);
+        await updateDoc(memberRef, {
+          lastActive: Date.now()
+        });
+      } catch (error) {
+        console.warn('Heartbeat registration failed:', error);
+      }
+    };
+
+    // Instant pulse
+    sendHeartbeat();
+
+    // Pulse every 15 seconds to maintain fresh presence
+    const interval = setInterval(sendHeartbeat, 15000);
+
+    return () => clearInterval(interval);
+  }, [activeTrip?.id, user?.uid]);
 
   const createTrip = async (data: Partial<Trip>) => {
     if (!user) return;
@@ -321,6 +352,23 @@ export function TripProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const withdrawJoinRequest = async (tripId: string) => {
+    if (!user) return;
+    try {
+      const tripRef = doc(db, 'trips', tripId);
+      await updateDoc(tripRef, {
+        members: arrayRemove(user.uid),
+        updatedAt: serverTimestamp()
+      });
+
+      await deleteDoc(doc(db, 'trips', tripId, 'members', user.uid));
+      toast.success('Withdrew join request successfully');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/members/${user.uid}/withdraw`);
+      toast.error('Failed to withdraw request');
+    }
+  };
+
   const updateChecklistItem = async (tripId: string, itemId: string, newText: string, newDueTime?: string) => {
     try {
       const itemRef = doc(db, 'trips', tripId, 'checklist', itemId);
@@ -363,6 +411,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
     toggleChecklistItem,
     removeMember,
     approveMember,
+    withdrawJoinRequest,
     updateChecklistItem
   }), [
     trips, 

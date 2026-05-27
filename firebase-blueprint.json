@@ -29,7 +29,8 @@
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
         "role": { "type": "string", "enum": ["owner", "editor", "viewer"] },
-        "joinedAt": { "type": "string", "format": "date-time" }
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "lastActive": { "type": "number", "description": "Client timestamp of last heartbeat user presence sync." }
       },
       "required": ["uid", "email", "role", "joinedAt"]
     },

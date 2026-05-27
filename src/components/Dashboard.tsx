@@ -1,18 +1,113 @@
-import { Plus, MapPin, Calendar, Users, ArrowRight, Wallet, ChevronRight, UserPlus, Link as LinkIcon, AlertTriangle, ExternalLink, HelpCircle, MessageCircle } from 'lucide-react';
-import { useTrip } from '../context/TripContext';
+import { Plus, MapPin, Calendar, Users, ArrowRight, Wallet, ChevronRight, UserPlus, Link as LinkIcon, AlertTriangle, ExternalLink, HelpCircle, MessageCircle, Search, GripVertical, X } from 'lucide-react';
+import { useTrip, Trip } from '../context/TripContext';
+import { useAuth } from '../context/AuthContext';
 import { formatDate, formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { UserAvatar } from './Avatar';
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const { trips, createTrip, joinTrip, setActiveTripId, indexErrorUrl, isIndexBuilding, loading } = useTrip();
   const navigate = useNavigate();
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
   const [joinId, setJoinId] = useState('');
   const [newTrip, setNewTrip] = useState({ name: '', destination: '', budget: 0, currency: 'INR' });
+
+  // Search and Sort states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [orderedTrips, setOrderedTrips] = useState<Trip[]>([]);
+
+  // Drag-and-drop states
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [hasDragged, setHasDragged] = useState(false);
+
+  // Synchronize orderedTrips with trips context + localStorage order
+  useEffect(() => {
+    if (!user || trips.length === 0) {
+      setOrderedTrips([]);
+      return;
+    }
+
+    const storedOrderStr = localStorage.getItem(`trip_order_${user.uid}`);
+    let storedOrder: string[] = [];
+    if (storedOrderStr) {
+      try {
+        storedOrder = JSON.parse(storedOrderStr);
+      } catch (e) {
+        console.error('Failed to parse trip order:', e);
+      }
+    }
+
+    const validStoredOrder = storedOrder.filter(id => trips.some(t => t.id === id));
+    const newTrips = trips.filter(t => !validStoredOrder.includes(t.id));
+
+    // Put new/unsorted trips first for immediate visibility
+    const finalOrderIds = [...newTrips.map(t => t.id), ...validStoredOrder];
+
+    const sorted = finalOrderIds
+      .map(id => trips.find(t => t.id === id))
+      .filter((t): t is Trip => !!t);
+
+    setOrderedTrips(sorted);
+  }, [trips, user]);
+
+  // Filter trips by search query (checks name or destination)
+  const filteredTrips = orderedTrips.filter(trip => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      trip.name.toLowerCase().includes(q) ||
+      (trip.destination && trip.destination.toLowerCase().includes(q))
+    );
+  });
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIdx(index);
+    setHasDragged(true);
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', index.toString());
+    } catch (_) {}
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === index) return;
+    setDragOverIdx(index);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === targetIndex) return;
+
+    const reordered = [...orderedTrips];
+    const [draggedItem] = reordered.splice(draggedIdx, 1);
+    reordered.splice(targetIndex, 0, draggedItem);
+
+    setOrderedTrips(reordered);
+
+    if (user) {
+      const orderIds = reordered.map(t => t.id);
+      localStorage.setItem(`trip_order_${user.uid}`, JSON.stringify(orderIds));
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIdx(null);
+    setDragOverIdx(null);
+    setTimeout(() => {
+      setHasDragged(false);
+    }, 50);
+  };
+
+  const handleCardClick = (tripId: string) => {
+    if (hasDragged) return;
+    navigate(`/trip/${tripId}`);
+  };
 
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
@@ -119,6 +214,40 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Search and Filter Bar */}
+      {!loading && trips.length > 0 && (
+        <div className="mb-8 max-w-xl">
+          <div className="relative group">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 dark:text-slate-500 group-focus-within:text-orange-500 transition-colors">
+              <Search className="w-5 h-5" />
+            </div>
+            <input
+              type="text"
+              placeholder="Search your journeys by name or destination..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-12 pl-12 pr-10 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm placeholder-slate-400 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all shadow-sm"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-amber-500 transition-colors"
+                title="Clear search"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          {searchQuery && (
+            <p className="text-[10px] font-bold text-orange-500/80 uppercase tracking-widest mt-2.5 px-1 flex items-center gap-1.5">
+              <span>Found {filteredTrips.length} matching {filteredTrips.length === 1 ? 'journey' : 'journeys'}</span>
+              <span className="text-[9px] text-slate-400 capitalize normal-case font-medium">(drag reordering paused during search)</span>
+            </p>
+          )}
+        </div>
+      )}
+
       {loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3].map((skeleton) => (
@@ -166,57 +295,98 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
+      ) : filteredTrips.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 text-center p-6">
+          <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4 text-orange-500">
+            <Search className="w-8 h-8" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-800 dark:text-white mb-1">No matching journeys</h3>
+          <p className="text-xs text-slate-400 mb-6 font-medium max-w-sm mx-auto">
+            We couldn't find any trips matching "{searchQuery}" in your roster. Check spelling or try searching for another destination!
+          </p>
+          <button
+            onClick={() => setSearchQuery('')}
+            className="px-5 py-2 text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 rounded-full transition-all active:scale-95 shadow-sm uppercase tracking-widest"
+          >
+            Clear Search
+          </button>
+        </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {trips.map((trip, idx) => (
-            <motion.div
-              key={trip.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.05 }}
-              onClick={() => navigate(`/trip/${trip.id}`)}
-              className="group cursor-pointer"
-            >
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-all duration-300 overflow-hidden flex flex-col h-full relative">
-                <div className="p-6 flex flex-col h-full">
-                  <div className="flex justify-between items-start mb-6">
-                    <div className="w-10 h-10 rounded-xl bg-orange-50 dark:bg-orange-950 flex items-center justify-center">
-                      <Wallet className="w-5 h-5 text-orange-500" />
-                    </div>
-                    <div className="text-right">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block leading-none mb-1">Budget</span>
-                      <span className="text-sm font-bold text-slate-800 dark:text-white">{formatCurrency(trip.budget, trip.currency)}</span>
-                    </div>
-                  </div>
+          {filteredTrips.map((trip, idx) => {
+            const isDragged = draggedIdx === idx;
+            const isDragOver = dragOverIdx === idx;
 
-                  <h3 className="text-base font-bold text-slate-800 dark:text-white mb-1 group-hover:text-orange-500 transition-colors line-clamp-2">{trip.name}</h3>
-                  <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-medium mb-6">
-                    <MapPin className="w-3.5 h-3.5" />
-                    <span>{trip.destination || 'Global'}</span>
-                  </div>
-
-                  <div className="mt-auto pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="flex -space-x-1.5">
-                        {trip.members.slice(0, 3).map((uid, i) => (
-                          <div key={i} className="w-6 h-6 rounded-full border-2 border-white dark:border-slate-900 overflow-hidden">
-                             <UserAvatar uid={uid} className="w-full h-full text-[6px]" />
+            return (
+              <div
+                key={trip.id}
+                onClick={() => handleCardClick(trip.id)}
+                className="group cursor-pointer transition-all duration-300"
+                draggable={!searchQuery}
+                onDragStart={(e) => handleDragStart(e, idx)}
+                onDragOver={(e) => handleDragOver(e, idx)}
+                onDragEnd={handleDragEnd}
+                onDrop={(e) => handleDrop(e, idx)}
+              >
+                <div className={cn(
+                  "bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-300 overflow-hidden flex flex-col h-full relative",
+                  isDragged ? "opacity-30 border-dashed border-orange-500 scale-[0.98]" : "border-slate-200 dark:border-slate-800 shadow-sm",
+                  isDragOver ? "ring-2 ring-orange-500 ring-offset-2 dark:ring-offset-slate-950" : "hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700"
+                )}>
+                  <div className="p-6 flex flex-col h-full">
+                    <div className="flex justify-between items-start mb-6">
+                      <div className="flex items-center gap-2">
+                        {!searchQuery && (
+                          <div 
+                            className="cursor-grab active:cursor-grabbing p-1.5 hover:bg-slate-100 dark:hover:bg-slate-850 rounded-lg text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400 transition-colors"
+                            onMouseDown={(e) => {
+                              // Prevent click triggering when initiating drag
+                              e.stopPropagation();
+                            }}
+                            title="Drag to prioritize"
+                          >
+                            <GripVertical className="w-4 h-4" />
                           </div>
-                        ))}
+                        )}
+                        <div className="w-10 h-10 rounded-xl bg-orange-50 dark:bg-orange-950 flex items-center justify-center">
+                          <Wallet className="w-5 h-5 text-orange-500" />
+                        </div>
                       </div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">
-                        {trip.members.length} Members
-                      </span>
+                      <div className="text-right">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block leading-none mb-1">Budget</span>
+                        <span className="text-sm font-bold text-slate-800 dark:text-white">{formatCurrency(trip.budget, trip.currency)}</span>
+                      </div>
                     </div>
-                    
-                    <button className="text-[10px] font-bold text-slate-300 uppercase tracking-widest group-hover:text-slate-900 dark:group-hover:text-white transition-colors flex items-center gap-1">
-                      Explore <ChevronRight className="w-3 h-3" />
-                    </button>
+
+                    <h3 className="text-base font-bold text-slate-800 dark:text-white mb-1 group-hover:text-orange-500 transition-colors line-clamp-2">{trip.name}</h3>
+                    <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-medium mb-6">
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>{trip.destination || 'Global'}</span>
+                    </div>
+
+                    <div className="mt-auto pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="flex -space-x-1.5">
+                          {trip.members.slice(0, 3).map((uid, i) => (
+                            <div key={i} className="w-6 h-6 rounded-full border-2 border-white dark:border-slate-900 overflow-hidden">
+                               <UserAvatar uid={uid} className="w-full h-full text-[6px]" />
+                            </div>
+                          ))}
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">
+                          {trip.members.length} Members
+                        </span>
+                      </div>
+                      
+                      <button className="text-[10px] font-bold text-slate-300 uppercase tracking-widest group-hover:text-slate-900 dark:group-hover:text-white transition-colors flex items-center gap-1">
+                        Explore <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </motion.div>
-          ))}
+            );
+          })}
         </div>
       )}
 

@@ -93,8 +93,10 @@ service cloud.firestore {
         allow create: if isSignedIn() && isValidId(memberId) && isValidMember(incoming());
         allow update: if isMemberOfTrip(tripId) && 
                         (get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid || request.auth.uid == memberId) &&
-                        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName', 'photoURL']);
-        allow delete: if isSignedIn() && get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid;
+                        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName', 'photoURL', 'lastActive']);
+        allow delete: if isSignedIn() && 
+                        (get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid || 
+                         (request.auth.uid == memberId && existing().role == 'pending'));
       }
 
       // Expenses
