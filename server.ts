@@ -17,6 +17,21 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    
+    // SPA fallback route for development
+    app.get('*', async (req, res, next) => {
+      if (req.originalUrl.startsWith('/api/') || req.originalUrl.includes('.')) {
+        return next();
+      }
+      try {
+        const fs = await import('fs');
+        const indexHtml = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf-8');
+        const transformedHtml = await vite.transformIndexHtml(req.originalUrl, indexHtml);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(transformedHtml);
+      } catch (e) {
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));

@@ -1,6 +1,6 @@
 import { 
   ArrowLeft, Plus, DollarSign, PieChart as PieChartIcon, Users, Receipt, 
-  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download, QrCode
+  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download, QrCode, Globe, Mic, MicOff
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useTrip } from '../context/TripContext';
@@ -32,6 +32,115 @@ export default function TripDetail() {
   const [isConfirmingWithdraw, setIsConfirmingWithdraw] = useState(false);
   const [memberToRemoveId, setMemberToRemoveId] = useState<string | null>(null);
   const [memberToApprove, setMemberToApprove] = useState<{ uid: string; displayName: string } | null>(null);
+
+  const [isListening, setIsListening] = useState(false);
+  const [voiceTarget, setVoiceTarget] = useState<'all' | 'description' | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [speechTranscript, setSpeechTranscript] = useState('');
+
+  const startSpeechRecognition = (target: 'all' | 'description') => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      toast.error("Web Speech API is not supported in this browser. Try using Google Chrome or Microsoft Edge.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    // Auto-detect lang preference or fallback to en-US for max compatibility on laptops, tabs, and desktops
+    recognition.lang = navigator.language || 'en-US';
+    recognition.interimResults = false;
+
+    setVoiceTarget(target);
+    setIsListening(true);
+    setVoiceError(null);
+    setSpeechTranscript('');
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setSpeechTranscript(transcript);
+      
+      if (target === 'description') {
+        setNewExpense(prev => ({
+          ...prev,
+          description: transcript
+        }));
+        toast.success(`Dictated description: "${transcript}"`);
+      } else if (target === 'all') {
+        const numberPattern = /\b\d+(?:\.\d+)?\b/g;
+        const matches = transcript.match(numberPattern);
+        let detectedAmount = 0;
+        let finalDesc = transcript;
+
+        if (matches && matches.length > 0) {
+          detectedAmount = parseFloat(matches[matches.length - 1]);
+        } else {
+          const wordsToNumbers: Record<string, number> = {
+            'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+            'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+            'twenty': 20, 'thirty': 30, 'forty': 40, 'fifty': 50,
+            'hundred': 100
+          };
+          const words = transcript.toLowerCase().split(/\s+/);
+          for (const word of words) {
+            if (wordsToNumbers[word] !== undefined) {
+              detectedAmount = wordsToNumbers[word];
+              break;
+            }
+          }
+        }
+
+        if (detectedAmount > 0) {
+          const amountStr = String(detectedAmount);
+          const regexStr = new RegExp(`\\b(${amountStr}|for|dollars|rupees|euro|cents|pounds|yen)\\b`, 'gi');
+          finalDesc = transcript.replace(regexStr, '').replace(/\s+/g, ' ').trim();
+          if (!finalDesc || finalDesc.length < 2) finalDesc = transcript;
+        }
+
+        let autoCategory = 'Other';
+        const lowerTranscript = transcript.toLowerCase();
+        if (lowerTranscript.includes('lunch') || lowerTranscript.includes('eat') || lowerTranscript.includes('breakfast') || lowerTranscript.includes('dinner') || lowerTranscript.includes('food') || lowerTranscript.includes('sushi') || lowerTranscript.includes('starbucks') || lowerTranscript.includes('coffee') || lowerTranscript.includes('cafe')) {
+          if (lowerTranscript.includes('breakfast')) autoCategory = 'Breakfast';
+          else if (lowerTranscript.includes('lunch')) autoCategory = 'Lunch';
+          else if (lowerTranscript.includes('dinner')) autoCategory = 'Dinner';
+          else autoCategory = 'Food';
+        } else if (lowerTranscript.includes('taxi') || lowerTranscript.includes('uber') || lowerTranscript.includes('cab') || lowerTranscript.includes('metro') || lowerTranscript.includes('bus') || lowerTranscript.includes('train') || lowerTranscript.includes('auto') || lowerTranscript.includes('flight') || lowerTranscript.includes('ticket')) {
+          if (lowerTranscript.includes('bus')) autoCategory = 'Bus';
+          else if (lowerTranscript.includes('train')) autoCategory = 'Train';
+          else if (lowerTranscript.includes('auto')) autoCategory = 'Auto';
+          else autoCategory = 'Transport';
+        } else if (lowerTranscript.includes('hotel') || lowerTranscript.includes('stay') || lowerTranscript.includes('hostel') || lowerTranscript.includes('airbnb') || lowerTranscript.includes('room')) {
+          autoCategory = 'Stay';
+        } else if (lowerTranscript.includes('fun') || lowerTranscript.includes('bar') || lowerTranscript.includes('club') || lowerTranscript.includes('museum') || lowerTranscript.includes('show') || lowerTranscript.includes('movie') || lowerTranscript.includes('entry') || lowerTranscript.includes('drink')) {
+          autoCategory = 'Fun';
+        }
+
+        setNewExpense(prev => ({
+          ...prev,
+          description: finalDesc.charAt(0).toUpperCase() + finalDesc.slice(1),
+          amount: detectedAmount || prev.amount,
+          category: autoCategory
+        }));
+
+        toast.success(`Dictated: "${finalDesc}" with amount ${detectedAmount ? detectedAmount : 'unmatched'}`);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error(event.error);
+      setVoiceError(event.error);
+      toast.error(`Voice input error: ${event.error}`);
+      setIsListening(false);
+      setVoiceTarget(null);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      setVoiceTarget(null);
+    };
+
+    recognition.start();
+  };
 
   useEffect(() => {
     if (tripId && (!activeTrip || activeTrip.id !== tripId)) {
@@ -577,13 +686,15 @@ export default function TripDetail() {
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 pt-20 md:pt-24 min-h-screen">
       <div className="sticky top-[56px] md:top-[64px] z-30 bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-md -mx-4 md:-mx-6 px-4 md:px-6 py-4 mb-4 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors">
-        <button 
-          onClick={() => navigate('/')}
-          className="flex items-center gap-2 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group self-start"
-        >
-          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-          <span className="font-bold uppercase tracking-[0.2em] text-[10px] md:text-[10px]">Back</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button 
+            onClick={() => navigate('/')}
+            className="flex items-center gap-2 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group self-start"
+          >
+            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+            <span className="font-bold uppercase tracking-[0.2em] text-[10px] md:text-[10px]">Back</span>
+          </button>
+        </div>
 
         <div className="flex items-center gap-2">
            <button 
@@ -682,7 +793,9 @@ export default function TripDetail() {
               </div>
               <div className="p-3 bg-purple-50 dark:bg-purple-900/10 rounded-xl flex items-center justify-between border border-purple-100/50 dark:border-purple-800/30">
                 <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold uppercase">Parity Share</span>
-                <span className="text-sm font-bold text-purple-900 dark:text-purple-200">{formatCurrency(totalSpent / (approvedMembers.length || 1), activeTrip.currency)}</span>
+                <div className="text-right">
+                  <span className="text-sm font-bold text-purple-900 dark:text-purple-200 block">{formatCurrency(totalSpent / (approvedMembers.length || 1), activeTrip.currency)}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -1364,8 +1477,81 @@ export default function TripDetail() {
                 Track Expense
               </h2>
               <form onSubmit={handleAddExpense} className="space-y-5">
+                {/* Hands-free Voice Logger Banner */}
+                <div className="bg-orange-50/50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/30 rounded-2xl p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-orange-100 dark:bg-orange-900/40 flex items-center justify-center text-orange-500 shrink-0">
+                        <Mic className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-[11px] font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">Hands-free Logger</h4>
+                        <p className="text-[9px] text-slate-400 dark:text-slate-500">Log expense in one sentence</p>
+                      </div>
+                    </div>
+                    
+                    <button
+                      type="button"
+                      onClick={() => isListening && voiceTarget === 'all' ? null : startSpeechRecognition('all')}
+                      className={cn(
+                        "px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all shadow-sm flex items-center gap-1.5 shrink-0",
+                        isListening && voiceTarget === 'all'
+                          ? "bg-red-500 text-white animate-pulse scale-95"
+                          : "bg-slate-900 dark:bg-orange-500 hover:scale-[1.02] active:scale-95 text-white"
+                      )}
+                    >
+                      {isListening && voiceTarget === 'all' ? (
+                        <>
+                          <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                          <span>Listening...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Mic className="w-3.5 h-3.5" />
+                          <span>Record Voice</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Real-time transcription display and custom tip helper */}
+                  {isListening && voiceTarget === 'all' ? (
+                    <div className="mt-3 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-xs text-slate-600 dark:text-slate-300 font-mono text-center flex flex-col gap-1.5">
+                      <span className="text-[8px] font-bold uppercase tracking-widest text-emerald-500 animate-pulse">Speak now...</span>
+                      <p className="italic text-slate-400">"{speechTranscript || 'Listening for your voice...'}"</p>
+                      <span className="text-[8px] text-slate-400 dark:text-slate-500">Say description and numeric value together.</span>
+                    </div>
+                  ) : (
+                    <div className="mt-3 pt-2.5 border-t border-slate-200/50 dark:border-slate-800/50 text-[9px] text-slate-400 dark:text-slate-500">
+                      <p className="font-bold uppercase tracking-widest text-[8px] text-slate-500 dark:text-slate-400 mb-1">💡 Voice Log Command Tips</p>
+                      <div className="grid grid-cols-2 gap-2 text-left font-mono">
+                        <div>🗣️ <span className="text-slate-600 dark:text-slate-300">"Taxi to airport 450"</span></div>
+                        <div>🗣️ <span className="text-slate-600 dark:text-slate-300">"Uber ride thirty"</span></div>
+                        <div>🗣️ <span className="text-slate-600 dark:text-slate-300">"Dinner team 120"</span></div>
+                        <div>🗣️ <span className="text-slate-600 dark:text-slate-300">"Breakfast coffee 15"</span></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Description</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400">Description</label>
+                    <button
+                      type="button"
+                      onClick={() => isListening && voiceTarget === 'description' ? null : startSpeechRecognition('description')}
+                      className={cn(
+                        "flex items-center gap-1 text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border transition-all",
+                        isListening && voiceTarget === 'description'
+                          ? "bg-red-500 border-red-500 text-white animate-pulse"
+                          : "bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                      )}
+                      title="Dictate Description only"
+                    >
+                      <Mic className="w-2.5 h-2.5" />
+                      <span>{isListening && voiceTarget === 'description' ? 'Listening...' : 'Dictate'}</span>
+                    </button>
+                  </div>
                   <input 
                     required
                     type="text" 
@@ -1374,6 +1560,9 @@ export default function TripDetail() {
                     onChange={e => setNewExpense({...newExpense, description: e.target.value})}
                     className="w-full h-12 px-5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-orange-500/10 transition-all dark:text-white text-sm"
                   />
+                  {isListening && voiceTarget === 'description' && (
+                    <p className="text-[9px] text-orange-500 italic mt-1 animate-pulse">Dictating: "{speechTranscript || 'waiting for voice...'}"</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Amount ({activeTrip.currency})</label>
