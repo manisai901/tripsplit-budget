@@ -17,7 +17,7 @@ import QRCode from 'qrcode';
 
 export default function TripDetail() {
   const { user } = useAuth();
-  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, withdrawJoinRequest, updateChecklistItem, setActiveTripId, joinTrip, loading } = useTrip();
+  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, withdrawJoinRequest, updateChecklistItem, updateTripSettings, setActiveTripId, joinTrip, loading } = useTrip();
   const { tripId } = useParams();
   const navigate = useNavigate();
 
@@ -30,6 +30,8 @@ export default function TripDetail() {
   const [editingText, setEditingText] = useState('');
   const [editingDueTime, setEditingDueTime] = useState('');
   const [isConfirmingWithdraw, setIsConfirmingWithdraw] = useState(false);
+  const [memberToRemoveId, setMemberToRemoveId] = useState<string | null>(null);
+  const [memberToApprove, setMemberToApprove] = useState<{ uid: string; displayName: string } | null>(null);
 
   useEffect(() => {
     if (tripId && (!activeTrip || activeTrip.id !== tripId)) {
@@ -227,6 +229,7 @@ export default function TripDetail() {
   const progressPercent = Math.min(100, (totalSpent / (activeTrip?.budget || 1)) * 100);
 
   const isOwner = activeTrip?.ownerId === user?.uid;
+  const canEdit = isOwner || (activeTrip?.allowTravellerEdits !== false && currentUserMember?.role === 'editor');
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -246,6 +249,10 @@ export default function TripDetail() {
   const handleAddExpense = async (e: FormEvent) => {
     e.preventDefault();
     if (!activeTrip) return;
+    if (!canEdit) {
+      toast.error('This ledger is locked for editing by the Trip Leader');
+      return;
+    }
     const finalCategory = newExpense.category === 'Other' ? (customCategory || 'Other') : newExpense.category;
     const now = new Date();
     const defaultTime = formatTime(now); // Requires 'formatTime' import if not already
@@ -288,6 +295,10 @@ export default function TripDetail() {
   const handleAddCheckItem = async (e: FormEvent) => {
     e.preventDefault();
     if (!activeTrip || !newCheckItem.trim()) return;
+    if (!canEdit) {
+      toast.error('This ledger is locked for editing by the Trip Leader');
+      return;
+    }
     await addChecklistItem(activeTrip.id, newCheckItem.trim(), newCheckTime);
     setNewCheckItem('');
     setNewCheckTime('');
@@ -326,9 +337,8 @@ export default function TripDetail() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleRemoveMember = async (memberId: string) => {
-    if (!activeTrip || !window.confirm('Are you sure you want to remove this member?')) return;
-    await removeMember(activeTrip.id, memberId);
+  const handleRemoveMember = (memberId: string) => {
+    setMemberToRemoveId(memberId);
   };
 
   const isTransitioning = useMemo(() => {
@@ -769,9 +779,9 @@ export default function TripDetail() {
               <div className="flex-1 flex flex-col sm:flex-row gap-3">
                 <input 
                   type="text" 
-                  placeholder={isPending ? "Pending Leader confirmation..." : "Add a mission objective..."}
+                  placeholder={isPending ? "Pending Leader confirmation..." : (!canEdit ? "🔒 Read-only: locked by Leader" : "Add a mission objective...")}
                   value={newCheckItem}
-                  disabled={isPending}
+                  disabled={isPending || !canEdit}
                   onChange={e => setNewCheckItem(e.target.value)}
                   className="flex-1 h-14 md:h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-5 text-base md:text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white disabled:opacity-60"
                   style={{ height: '20.4844px', width: '277.789px' }}
@@ -779,12 +789,12 @@ export default function TripDetail() {
                 <input 
                   type="time" 
                   value={newCheckTime}
-                  disabled={isPending}
+                  disabled={isPending || !canEdit}
                   onChange={e => setNewCheckTime(e.target.value)}
                   className="w-full sm:w-36 h-14 md:h-12 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-4 text-base md:text-sm outline-none focus:ring-2 focus:ring-emerald-500/10 transition-all dark:text-white disabled:opacity-60"
                 />
               </div>
-              <button disabled={!newCheckItem || isPending} className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-8 h-14 md:h-12 rounded-xl text-sm md:text-xs font-bold uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
+              <button disabled={!newCheckItem || isPending || !canEdit} className="bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 px-8 h-14 md:h-12 rounded-xl text-sm md:text-xs font-bold uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50">
                 Add Objective
               </button>
             </form>
@@ -815,6 +825,10 @@ export default function TripDetail() {
                         if (isEditing) return;
                         if (isPending) {
                           toast.error('You are pending leader confirmation');
+                          return;
+                        }
+                        if (!canEdit) {
+                          toast.error('This ledger is locked for editing by the Trip Leader');
                           return;
                         }
                         toggleChecklistItem(activeTrip.id, item.id, !item.completed);
@@ -889,7 +903,7 @@ export default function TripDetail() {
                           </div>
                           
                           {/* Option to modify: 1 time only if not completed and not pending and hasn't been modified yet */}
-                          {!item.completed && !isPending && (
+                          {!item.completed && !isPending && canEdit && (
                             <div className="flex shrink-0 ml-2" onClick={e => e.stopPropagation()}>
                               {(!item.modifiedCount || item.modifiedCount < 1) ? (
                                 <button
@@ -974,12 +988,18 @@ export default function TripDetail() {
                       <span className="w-1.5 h-1.5 rounded-full bg-white ml-0.5"></span>
                     )}
                   </button>
-                  <button 
-                    onClick={() => setIsAddingExpense(true)}
-                    className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-orange-500/20"
-                  >
-                    + Add Record
-                  </button>
+                   {canEdit ? (
+                    <button 
+                      onClick={() => setIsAddingExpense(true)}
+                      className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all active:scale-95 shadow-lg shadow-orange-500/20"
+                    >
+                      + Add Record
+                    </button>
+                  ) : (
+                    <span className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-3.5 py-2 rounded-full text-[9px] font-black uppercase tracking-widest border border-slate-200 dark:border-slate-700">
+                      🔒 Read-Only
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1633,6 +1653,31 @@ export default function TripDetail() {
                   </div>
                   <p className="mt-3 text-[10px] text-orange-600/70 font-medium leading-relaxed mb-4">Share this ID with other nomads to have them join this trip's ledger system.</p>
                   
+                  {isOwner && (
+                    <div className="mt-4 pt-4 border-t border-orange-100 dark:border-orange-500/10 flex items-center justify-between">
+                      <div className="pr-4">
+                        <span className="text-[10px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block mb-0.5">Traveler Write Settings</span>
+                        <span className="text-[9px] text-slate-400 font-medium block leading-relaxed">
+                          Allow joined travelers to add expenses, make checklist updates, and modify objectives.
+                        </span>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          const newVal = activeTrip.allowTravellerEdits !== false ? false : true;
+                          await updateTripSettings(activeTrip.id, { allowTravellerEdits: newVal });
+                        }}
+                        className={cn(
+                          "px-4 py-2 text-[9px] font-black uppercase tracking-wider rounded-xl transition-all shadow-sm shrink-0 border",
+                          activeTrip.allowTravellerEdits !== false
+                            ? "bg-slate-900 dark:bg-orange-600 text-white border-transparent"
+                            : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700"
+                        )}
+                      >
+                        {activeTrip.allowTravellerEdits !== false ? "Editor" : "Read-Only"}
+                      </button>
+                    </div>
+                  )}
+                  
                   {qrUrl && (
                     <div className="mt-4 pt-4 border-t border-orange-100 dark:border-orange-500/10 flex flex-col items-center">
                       <div className="bg-white p-3 rounded-2xl shadow-md border border-orange-100 max-w-[150px]">
@@ -1677,13 +1722,8 @@ export default function TripDetail() {
                           {isOwner ? (
                             <>
                               <button 
-                                onClick={async () => {
-                                  try {
-                                    await approveMember(activeTrip.id, member.uid);
-                                    toast.success(`${member.displayName || 'Member'} approved successfully!`);
-                                  } catch (err: any) {
-                                    toast.error(err.message || "Failed to approve member");
-                                  }
+                                onClick={() => {
+                                  setMemberToApprove({ uid: member.uid, displayName: member.displayName || 'Traveler' });
                                 }}
                                 className="h-8 px-3.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-bold text-[10px] uppercase tracking-wider transition-colors shadow-sm"
                               >
@@ -1878,6 +1918,155 @@ export default function TripDetail() {
                   </button>
                 </div>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Remove Member Confirmation Modal */}
+      <AnimatePresence>
+        {memberToRemoveId && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
+              onClick={() => setMemberToRemoveId(null)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[32px] overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 p-6 flex flex-col items-center text-center"
+            >
+              <div className="w-14 h-14 bg-red-50 dark:bg-red-950/30 rounded-full flex items-center justify-center mb-4">
+                <UserMinus className="w-6 h-6 text-red-500" />
+              </div>
+              <h3 className="text-lg font-black text-slate-800 dark:text-white">Remove Member</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed mt-2 mb-6">
+                Are you sure you want to remove{" "}
+                <span className="font-bold text-slate-800 dark:text-white">
+                  {members.find(m => m.uid === memberToRemoveId)?.displayName || 'this member'}
+                </span>{" "}
+                from this expedition ledger? All joint calculations will be dynamically updated.
+              </p>
+              <div className="flex gap-3 w-full">
+                <button 
+                  onClick={() => setMemberToRemoveId(null)}
+                  className="flex-1 h-12 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 transition-colors text-xs uppercase tracking-widest"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={async () => {
+                    await removeMember(activeTrip.id, memberToRemoveId);
+                    setMemberToRemoveId(null);
+                  }}
+                  className="flex-1 h-12 rounded-xl font-bold bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/20 transition-all active:scale-95 text-xs uppercase tracking-widest"
+                >
+                  Yes, Confirm
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Approve Member Role Picker Modal */}
+      <AnimatePresence>
+        {memberToApprove && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
+              onClick={() => setMemberToApprove(null)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 p-6"
+            >
+              <div className="flex justify-between items-start mb-5">
+                <div>
+                  <h3 className="text-lg font-black text-slate-800 dark:text-white">Configure Traveler Access</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+                    Select permissions for {memberToApprove.displayName}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setMemberToApprove(null)}
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="space-y-3.5 mb-6">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await approveMember(activeTrip.id, memberToApprove.uid, 'editor');
+                    } catch (e) {
+                      console.error(e);
+                    } finally {
+                      setMemberToApprove(null);
+                    }
+                  }}
+                  className="w-full text-left p-4 rounded-2xl border border-slate-200 dark:border-slate-800 dark:hover:border-slate-700 bg-slate-50 dark:bg-slate-800/30 hover:bg-orange-500/5 hover:border-orange-500/30 transition-all flex items-start gap-4"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-orange-100 dark:bg-orange-950/40 flex items-center justify-center shrink-0">
+                    <Activity className="w-5 h-5 text-orange-500" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-black text-slate-800 dark:text-white flex items-center gap-1.5 leading-none mb-1">
+                      Editor Mode
+                      <span className="text-[8px] font-black uppercase text-orange-600 bg-orange-100 dark:bg-orange-950/60 px-1.5 py-0.5 rounded">Full Access</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium leading-relaxed">
+                      Can write & view everything. Fully edit joint expenses, check off collaborative tasks, and manage checklists.
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await approveMember(activeTrip.id, memberToApprove.uid, 'viewer');
+                    } catch (e) {
+                      console.error(e);
+                    } finally {
+                      setMemberToApprove(null);
+                    }
+                  }}
+                  className="w-full text-left p-4 rounded-2xl border border-slate-200 dark:border-slate-800 dark:hover:border-slate-700 bg-slate-50 dark:bg-slate-800/30 hover:bg-emerald-500/5 hover:border-emerald-500/30 transition-all flex items-start gap-4"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-black text-slate-800 dark:text-white flex items-center gap-1.5 leading-none mb-1">
+                      Viewer Mode
+                      <span className="text-[8px] font-black uppercase text-emerald-600 bg-emerald-100 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded">Read-Only</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 dark:text-slate-500 font-medium leading-relaxed">
+                      Just to see. View live budgets, settlement calculations, history, and real-time objectives without permission to modify.
+                    </p>
+                  </div>
+                </button>
+              </div>
+
+              <button 
+                onClick={() => setMemberToApprove(null)}
+                className="w-full h-12 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-xs uppercase tracking-widest"
+              >
+                Close
+              </button>
             </motion.div>
           </div>
         )}

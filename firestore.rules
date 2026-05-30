@@ -31,12 +31,33 @@ service cloud.firestore {
       return isSignedIn() && (request.auth.uid in get(/databases/$(database)/documents/trips/$(tripId)).data.members);
     }
 
+    function isTripOwner(tripId) {
+      return isSignedIn() && get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid;
+    }
+
+    function canTripMemberEdit(tripId) {
+      return isSignedIn() && (
+        isTripOwner(tripId) || (
+          get(/databases/$(database)/documents/trips/$(tripId)).data.allowTravellerEdits != false &&
+          get(/databases/$(database)/documents/trips/$(tripId)/members/$(request.auth.uid)).data.role == 'editor'
+        )
+      );
+    }
+
     // --- Validation Helpers ---
-    function isValidTrip(data) {
+    function isValidTripCreate(data) {
       return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.ownerId == request.auth.uid &&
              data.members is list && data.members.size() > 0 && data.members.size() <= 20 &&
              data.createdAt == request.time &&
+             data.updatedAt == request.time;
+    }
+
+    function isValidTripUpdate(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.ownerId == existing().ownerId &&
+             data.members is list && data.members.size() > 0 && data.members.size() <= 20 &&
+             data.createdAt == existing().createdAt &&
              data.updatedAt == request.time;
     }
 
@@ -75,59 +96,64 @@ service cloud.firestore {
       // allow get: checked by isMemberOfTrip or simpler:
       allow get: if isSignedIn() && (request.auth.uid in resource.data.members || request.auth.uid != null); // Allow fetching to join
       allow list: if isSignedIn() && (request.auth.uid in resource.data.members);
-      allow create: if isSignedIn() && isEmailVerified() && isValidId(tripId) && isValidTrip(incoming());
+      allow create: if isSignedIn() && isEmailVerified() && isValidId(tripId) && isValidTripCreate(incoming());
       allow update: if isSignedIn() && (
-                        (request.auth.uid == existing().ownerId && 
-                         isValidTrip(incoming()) && 
+                        (isTripOwner(tripId) && 
+                         isValidTripUpdate(incoming()) && 
                          incoming().ownerId == existing().ownerId &&
                          incoming().createdAt == existing().createdAt &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'destination', 'startDate', 'endDate', 'budget', 'currency', 'updatedAt', 'members']))
+                         incoming().diff(existing()).affectedKeys().hasOnly(['name', 'destination', 'startDate', 'endDate', 'budget', 'currency', 'updatedAt', 'members', 'allowTravellerEdits']))
                         ||
                         (request.auth.uid != null && incoming().diff(existing()).affectedKeys().hasOnly(['members', 'updatedAt']))
                       );
-      allow delete: if isSignedIn() && (request.auth.uid == existing().ownerId);
+      allow delete: if isSignedIn() && isTripOwner(tripId);
 
       // Members Subcollection (for detailed profiles)
       match /members/{memberId} {
         allow read: if isMemberOfTrip(tripId);
         allow create: if isSignedIn() && isValidId(memberId) && isValidMember(incoming());
         allow update: if isMemberOfTrip(tripId) && 
-                        (get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid || request.auth.uid == memberId) &&
-                        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName', 'photoURL', 'lastActive']);
+                        (
+                          (isTripOwner(tripId) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName', 'photoURL', 'lastActive']))
+                          ||
+                          (request.auth.uid == memberId &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'lastActive']))
+                        );
         allow delete: if isSignedIn() && 
-                        (get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid || 
+                        (isTripOwner(tripId) || 
                          (request.auth.uid == memberId && existing().role == 'pending'));
       }
 
       // Expenses
       match /expenses/{expenseId} {
         allow read: if isMemberOfTrip(tripId);
-        allow create: if isMemberOfTrip(tripId) && isValidId(expenseId) && isValidExpense(incoming()) && (incoming().payerId == request.auth.uid);
-        allow update: if isMemberOfTrip(tripId) && 
-                        (existing().payerId == request.auth.uid || get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid) &&
+        allow create: if canTripMemberEdit(tripId) && isValidId(expenseId) && isValidExpense(incoming()) && (incoming().payerId == request.auth.uid);
+        allow update: if canTripMemberEdit(tripId) && 
+                        (existing().payerId == request.auth.uid || isTripOwner(tripId)) &&
                         isValidExpense(incoming()) &&
                         incoming().payerId == existing().payerId &&
                         incoming().createdAt == existing().createdAt &&
                         incoming().diff(existing()).affectedKeys().hasOnly(['amount', 'description', 'category', 'date', 'participants', 'splitType']);
-        allow delete: if isMemberOfTrip(tripId) && (existing().payerId == request.auth.uid || get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid);
+        allow delete: if canTripMemberEdit(tripId) && (existing().payerId == request.auth.uid || isTripOwner(tripId));
       }
 
       // Checklist
       match /checklist/{itemId} {
         allow read: if isMemberOfTrip(tripId);
-        allow create: if isMemberOfTrip(tripId) && isValidId(itemId) && isValidChecklistItem(incoming());
-        allow update: if isMemberOfTrip(tripId) && 
+        allow create: if canTripMemberEdit(tripId) && isValidId(itemId) && isValidChecklistItem(incoming());
+        allow update: if canTripMemberEdit(tripId) && 
                         incoming().diff(existing()).affectedKeys().hasOnly(['completed', 'text', 'dueTime', 'modifiedCount', 'completedAt']);
-        allow delete: if isMemberOfTrip(tripId);
+        allow delete: if canTripMemberEdit(tripId);
       }
 
       // Settlements
       match /settlements/{settlementId} {
         allow read: if isMemberOfTrip(tripId);
-        allow create: if isMemberOfTrip(tripId) && isValidId(settlementId) && isValidSettlement(incoming());
-        allow update: if isMemberOfTrip(tripId) && (existing().fromId == request.auth.uid || existing().toId == request.auth.uid || get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid) &&
+        allow create: if canTripMemberEdit(tripId) && isValidId(settlementId) && isValidSettlement(incoming());
+        allow update: if canTripMemberEdit(tripId) && (existing().fromId == request.auth.uid || existing().toId == request.auth.uid || isTripOwner(tripId)) &&
                         incoming().diff(existing()).affectedKeys().hasOnly(['status']);
-        allow delete: if isSignedIn() && get(/databases/$(database)/documents/trips/$(tripId)).data.ownerId == request.auth.uid;
+        allow delete: if isSignedIn() && isTripOwner(tripId);
       }
     }
   }

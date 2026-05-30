@@ -31,6 +31,7 @@ export interface Trip {
   ownerId: string;
   members: string[];
   createdAt: any;
+  allowTravellerEdits?: boolean;
 }
 
 interface Member {
@@ -87,9 +88,10 @@ interface TripContextType {
   addChecklistItem: (tripId: string, text: string, dueTime?: string) => Promise<void>;
   toggleChecklistItem: (tripId: string, itemId: string, completed: boolean) => Promise<void>;
   removeMember: (tripId: string, memberId: string) => Promise<void>;
-  approveMember: (tripId: string, memberId: string) => Promise<void>;
+  approveMember: (tripId: string, memberId: string, role?: 'editor' | 'viewer') => Promise<void>;
   withdrawJoinRequest: (tripId: string) => Promise<void>;
   updateChecklistItem: (tripId: string, itemId: string, newText: string, newDueTime?: string) => Promise<void>;
+  updateTripSettings: (tripId: string, settings: Partial<Trip>) => Promise<void>;
 }
 
 const TripContext = createContext<TripContextType | undefined>(undefined);
@@ -223,6 +225,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
         members: [user.uid],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
+        allowTravellerEdits: true
       };
       await setDoc(doc(db, 'trips', tripId), tripData);
 
@@ -271,9 +274,30 @@ export function TripProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const checkWriteAccess = (tripId: string) => {
+    if (!user) throw new Error('Not authenticated');
+    const trip = trips.find(t => t.id === tripId);
+    if (!trip) throw new Error('Trip not found');
+    
+    if (trip.ownerId === user.uid) {
+      return true;
+    }
+    
+    if (trip.allowTravellerEdits === false) {
+      throw new Error('This trip ledger is set to read-only by the organizer.');
+    }
+    
+    const currentMember = members.find(m => m.uid === user.uid);
+    if (!currentMember || currentMember.role !== 'editor') {
+      throw new Error('Your account is set to Viewer (Read-Only) or is Pending approval.');
+    }
+    return true;
+  };
+
   const addExpense = async (tripId: string, data: Partial<Expense>) => {
     if (!user) return;
     try {
+      checkWriteAccess(tripId);
       await addDoc(collection(db, 'trips', tripId, 'expenses'), {
         ...data,
         payerId: data.payerId || user.uid,
@@ -285,13 +309,14 @@ export function TripProvider({ children }: { children: ReactNode }) {
       toast.success('Expense recorded successfully!');
     } catch (error: any) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/expenses`);
-      toast.error('Failed to record expense');
+      toast.error(error.message || 'Failed to record expense');
     }
   };
 
   const addChecklistItem = async (tripId: string, text: string, dueTime?: string) => {
     if (!user) return;
     try {
+      checkWriteAccess(tripId);
       await addDoc(collection(db, 'trips', tripId, 'checklist'), {
         text,
         completed: false,
@@ -303,18 +328,20 @@ export function TripProvider({ children }: { children: ReactNode }) {
       toast.success('Task added successfully!');
     } catch (error: any) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/checklist`);
-      toast.error('Failed to add task');
+      toast.error(error.message || 'Failed to add task');
     }
   };
 
   const toggleChecklistItem = async (tripId: string, itemId: string, completed: boolean) => {
     try {
+      checkWriteAccess(tripId);
       await updateDoc(doc(db, 'trips', tripId, 'checklist', itemId), {
         completed,
         completedAt: completed ? serverTimestamp() : null
       });
-    } catch (error) {
+    } catch (error: any) {
       handleFirestoreError(error, OperationType.UPDATE, `trips/${tripId}/checklist/${itemId}`);
+      toast.error(error.message || 'Failed to update task check status');
     }
   };
 
@@ -332,20 +359,22 @@ export function TripProvider({ children }: { children: ReactNode }) {
       });
 
       await deleteDoc(doc(db, 'trips', tripId, 'members', memberId));
+      toast.success('Member removed successfully');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/members/${memberId}`);
+      toast.error('Failed to remove member');
     }
   };
 
-  const approveMember = async (tripId: string, memberId: string) => {
+  const approveMember = async (tripId: string, memberId: string, role: 'editor' | 'viewer' = 'editor') => {
     if (!user || !activeTrip) return;
     try {
       if (activeTrip.ownerId !== user.uid) throw new Error('Only owners can approve members');
 
       await updateDoc(doc(db, 'trips', tripId, 'members', memberId), {
-        role: 'editor'
+        role: role
       });
-      toast.success('Traveler approved successfully!');
+      toast.success(`Traveler approved as ${role === 'editor' ? 'Editor' : 'Viewer'} successfully!`);
     } catch (error: any) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/members/${memberId}/approve`);
       toast.error('Failed to approve member');
@@ -371,6 +400,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
 
   const updateChecklistItem = async (tripId: string, itemId: string, newText: string, newDueTime?: string) => {
     try {
+      checkWriteAccess(tripId);
       const itemRef = doc(db, 'trips', tripId, 'checklist', itemId);
       const snapshot = await getDocFromServer(itemRef);
       if (!snapshot.exists()) throw new Error('Objective not found');
@@ -390,7 +420,27 @@ export function TripProvider({ children }: { children: ReactNode }) {
       toast.success('Objective modified successfully!');
     } catch (error: any) {
       handleFirestoreError(error, OperationType.UPDATE, `trips/${tripId}/checklist/${itemId}`);
-      toast.error('Failed to modify objective');
+      toast.error(error.message || 'Failed to modify objective');
+    }
+  };
+
+  const updateTripSettings = async (tripId: string, settings: Partial<Trip>) => {
+    if (!user) return;
+    try {
+      const trip = trips.find(t => t.id === tripId);
+      if (!trip) throw new Error('Trip not found');
+      if (trip.ownerId !== user.uid) {
+        throw new Error('Only the organizer can update trip settings.');
+      }
+      const tripRef = doc(db, 'trips', tripId);
+      await updateDoc(tripRef, {
+        ...settings,
+        updatedAt: serverTimestamp()
+      });
+      toast.success('Trip setting updated!');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.UPDATE, `trips/${tripId}`);
+      toast.error(error.message || 'Failed to update trip settings');
     }
   };
 
@@ -412,7 +462,8 @@ export function TripProvider({ children }: { children: ReactNode }) {
     removeMember,
     approveMember,
     withdrawJoinRequest,
-    updateChecklistItem
+    updateChecklistItem,
+    updateTripSettings
   }), [
     trips, 
     activeTrip, 
