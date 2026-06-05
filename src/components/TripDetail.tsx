@@ -190,7 +190,7 @@ export default function TripDetail() {
 
   useEffect(() => {
     if (activeTrip?.id) {
-      const inviteUrl = `${window.location.origin}/trip/${activeTrip.id}`;
+      const inviteUrl = `${window.location.origin}/#/trip/${activeTrip.id}`;
       QRCode.toDataURL(inviteUrl, {
         margin: 2,
         width: 380,

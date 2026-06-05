@@ -18,8 +18,8 @@ import Contact from './components/pages/Contact';
 import TermsOfService from './components/pages/TermsOfService';
 import HelpCenter from './components/pages/HelpCenter';
 import { AnimatePresence, motion } from 'motion/react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { Toaster } from 'sonner';
+import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Toaster, toast } from 'sonner';
 
 import { useEffect, useState } from 'react';
 
@@ -30,6 +30,46 @@ function AppContent() {
   const [theme, setTheme] = useState<'light' | 'dark'>(
     (localStorage.getItem('theme') as any) || 'light'
   );
+
+  // Network Status Notification Listener
+  useEffect(() => {
+    let offlineToastId: string | number | null = null;
+
+    const handleOnline = () => {
+      // Dismiss any existing offline notification toast
+      if (offlineToastId) {
+        toast.dismiss(offlineToastId);
+        offlineToastId = null;
+      }
+      toast.success("Connection Connected", {
+        description: "Your internet connection has been restored. Changes will sync.",
+        duration: 4000,
+      });
+    };
+
+    const handleOffline = () => {
+      offlineToastId = toast.error("Offline Mode Active", {
+        description: "You are offline. Any changes will automatically sync once connectivity resolves.",
+        duration: Infinity, // Keep the banner/toast active while offline so user knows current state
+      });
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    // Initial check (in case the user loads the app when already offline)
+    if (!navigator.onLine) {
+      handleOffline();
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      if (offlineToastId) {
+        toast.dismiss(offlineToastId);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -57,7 +97,11 @@ function AppContent() {
     );
   }
 
-  if (!user) {
+  // Define public routes that don't require authentication
+  const publicRoutes = ['/privacy', '/about', '/contact', '/terms', '/help'];
+  const isPublicRoute = publicRoutes.includes(location.pathname);
+
+  if (!user && !isPublicRoute) {
     return (
       <>
         <Toaster theme={theme} position="top-center" />
@@ -67,7 +111,7 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-screen relative flex flex-col">
+    <div className="min-h-screen relative flex flex-col pt-14 md:pt-16">
       <Toaster theme={theme} position="top-center" />
       <RouteProgressBar />
       <Header theme={theme} setTheme={setTheme} />
