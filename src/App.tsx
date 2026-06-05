@@ -18,7 +18,7 @@ import Contact from './components/pages/Contact';
 import TermsOfService from './components/pages/TermsOfService';
 import HelpCenter from './components/pages/HelpCenter';
 import { AnimatePresence, motion } from 'motion/react';
-import { HashRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 
 import { useEffect, useState } from 'react';

@@ -44,6 +44,18 @@ service cloud.firestore {
       );
     }
 
+    function isOnlyAddingSelf(tripId) {
+      return incoming().members.size() == existing().members.size() + 1 &&
+             incoming().members.hasAll(existing().members) &&
+             (request.auth.uid in incoming().members);
+    }
+
+    function isOnlyRemovingSelf(tripId) {
+      return incoming().members.size() == existing().members.size() - 1 &&
+             existing().members.hasAll(incoming().members) &&
+             !(request.auth.uid in incoming().members);
+    }
+
     // --- Validation Helpers ---
     function isValidTripCreate(data) {
       return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
@@ -104,14 +116,18 @@ service cloud.firestore {
                          incoming().createdAt == existing().createdAt &&
                          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'destination', 'startDate', 'endDate', 'budget', 'currency', 'updatedAt', 'members', 'allowTravellerEdits']))
                         ||
-                        (request.auth.uid != null && incoming().diff(existing()).affectedKeys().hasOnly(['members', 'updatedAt']))
+                        ((isOnlyAddingSelf(tripId) || isOnlyRemovingSelf(tripId)) && 
+                         incoming().diff(existing()).affectedKeys().hasOnly(['members', 'updatedAt']))
                       );
       allow delete: if isSignedIn() && isTripOwner(tripId);
 
       // Members Subcollection (for detailed profiles)
       match /members/{memberId} {
         allow read: if isMemberOfTrip(tripId);
-        allow create: if isSignedIn() && isValidId(memberId) && isValidMember(incoming());
+        allow create: if isSignedIn() && isValidId(memberId) && isValidMember(incoming()) && (
+                        isTripOwner(tripId) ||
+                        (memberId == request.auth.uid && incoming().role == 'pending')
+                      );
         allow update: if isMemberOfTrip(tripId) && 
                         (
                           (isTripOwner(tripId) &&
