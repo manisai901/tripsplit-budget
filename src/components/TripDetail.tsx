@@ -919,14 +919,18 @@ export default function TripDetail() {
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-6 pt-20 md:pt-24 min-h-screen">
       <div className="sticky top-[56px] md:top-[64px] z-30 bg-slate-50/80 dark:bg-slate-950/80 backdrop-blur-md -mx-4 md:-mx-6 px-4 md:px-6 py-4 mb-4 border-b border-slate-200 dark:border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-3">
           <button 
             onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group self-start"
+            className="flex items-center gap-2 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors group"
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-            <span className="font-bold uppercase tracking-[0.2em] text-[10px] md:text-[10px]">Back</span>
+            <span className="font-bold uppercase tracking-[0.2em] text-[10px]">Back</span>
           </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-800 hidden md:block" />
+          <h1 className="text-sm md:text-base font-black text-slate-800 dark:text-white tracking-tight truncate max-w-[200px] md:max-w-md">
+            {activeTrip.name}
+          </h1>
         </div>
 
         <div className="flex items-center gap-2">
@@ -965,23 +969,24 @@ export default function TripDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8">
         <div className="lg:col-span-8">
           <div className="stat-gradient p-6 md:p-10 rounded-3xl text-white shadow-xl relative overflow-hidden h-full flex flex-col justify-center">
-            <div className="relative z-10">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-[10px] md:text-[11px] font-bold uppercase tracking-widest opacity-80 animate-pulse">Live Budget Sync</span>
-                <div className="w-1.5 h-1.5 rounded-full bg-white opacity-50 animate-ping" />
+            <div className="relative z-10 w-full">
+              <div className="mb-4 flex animate-fade-in">
+                <span className="text-[10px] font-black uppercase tracking-widest bg-white/10 px-3 py-1 rounded-full text-white border border-white/15 backdrop-blur-sm flex items-center gap-1">
+                  📍 {activeTrip.name}
+                </span>
               </div>
-              <h1 className="text-2xl md:text-4xl font-black tracking-tight mb-4 opacity-90 text-white truncate max-w-full">{activeTrip.name}</h1>
-              <div className="flex flex-wrap items-baseline gap-2 md:gap-3">
-                <h2 className="text-3xl sm:text-4xl md:text-6xl font-black tracking-tighter break-all">
-                  {formatCurrency(totalSpent, activeTrip.currency)}
-                </h2>
-                <span className="text-base md:text-xl font-medium opacity-70">spent out of {formatCurrency(activeTrip.budget, activeTrip.currency)}</span>
+              <div className="flex items-center gap-1.5 mb-1 opacity-90">
+                <span className="text-xs md:text-sm">💰</span>
+                <span className="text-[10px] md:text-[11px] font-bold uppercase tracking-widest">TOTAL SPENT</span>
               </div>
-              <div className="mt-8 bg-white/10 backdrop-blur-md p-5 rounded-2xl border border-white/10 shrink-0">
-                <div className="flex justify-between text-[10px] font-bold mb-3 uppercase tracking-widest">
-                  <span>Usage Intensity</span>
-                  <span>{Math.round(progressPercent)}% Exhausted</span>
-                </div>
+              <h2 className="text-3.5xl md:text-6xl font-black tracking-tight mb-2 select-all text-white leading-none">
+                {formatCurrency(totalSpent, activeTrip.currency)}
+              </h2>
+              <p className="text-xs md:text-sm font-medium opacity-85 mb-6">
+                of {formatCurrency(activeTrip.budget, activeTrip.currency)} budget · {approvedMembers.length} {approvedMembers.length === 1 ? 'member' : 'members'}
+              </p>
+
+              <div className="w-full">
                 <div className="w-full h-2.5 bg-white/20 rounded-full overflow-hidden shadow-inner">
                   <motion.div 
                     initial={{ width: 0 }}
@@ -992,20 +997,51 @@ export default function TripDetail() {
                     )}
                   />
                 </div>
-                <AnimatePresence>
-                  {progressPercent >= 80 && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center gap-3 backdrop-blur-md"
-                    >
-                      <AlertTriangle className="w-4 h-4 text-red-200" />
-                      <p className="text-[10px] font-bold text-red-100 uppercase tracking-widest">
-                        {progressPercent >= 100 ? "Budget exceeded" : "Approaching budget limit"}
-                      </p>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                
+                <div className="flex justify-between items-center text-[10px] font-bold mt-2.5 uppercase tracking-widest opacity-95">
+                  <span>{Math.round(progressPercent)}% used</span>
+                  <span>
+                    {totalSpent > (activeTrip?.budget || 0) ? (
+                      <span className="text-red-200 font-extrabold">{formatCurrency(totalSpent - (activeTrip?.budget || 0), activeTrip.currency)} over budget</span>
+                    ) : (
+                      <span>{formatCurrency((activeTrip?.budget || 0) - totalSpent, activeTrip.currency)} remaining</span>
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              <AnimatePresence>
+                {progressPercent >= 80 && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center gap-3 backdrop-blur-md"
+                  >
+                    <AlertTriangle className="w-4 h-4 text-red-200" />
+                    <p className="text-[10px] font-bold text-red-100 uppercase tracking-widest">
+                      {progressPercent >= 100 ? "Budget exceeded" : "Approaching budget limit"}
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Live Budget Sync Plans */}
+              <div className="flex gap-2.5 mt-6 flex-wrap">
+                {/* Per Person Card */}
+                <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/10 flex flex-col justify-center min-w-[110px]" style={{ backgroundColor: 'rgba(255, 255, 255, 0.12)' }}>
+                  <span className="text-base md:text-xl font-black text-white leading-none">
+                    {formatCurrency(totalSpent / (approvedMembers.length || 1), activeTrip.currency)}
+                  </span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-white/80 mt-1">PER PERSON</span>
+                </div>
+
+                {/* Members Card */}
+                <div className="bg-white/10 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-white/10 flex flex-col justify-center min-w-[100px]" style={{ backgroundColor: 'rgba(255, 255, 255, 0.12)' }}>
+                  <span className="text-base md:text-xl font-black text-white leading-none">
+                    {approvedMembers.length}
+                  </span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-white/80 mt-1">MEMBERS</span>
+                </div>
               </div>
             </div>
             <Plane className="absolute right-[-10%] bottom-[-10%] w-48 h-48 md:w-64 md:h-64 opacity-10 -rotate-12 pointer-events-none" />
