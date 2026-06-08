@@ -1,23 +1,24 @@
 import { 
   ArrowLeft, Plus, DollarSign, PieChart as PieChartIcon, Users, Receipt, 
-  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download, QrCode, Globe, Mic, MicOff
+  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download, QrCode, Globe, Mic, MicOff, Camera, FileText, Loader2, ExternalLink
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useTrip } from '../context/TripContext';
 import { formatDate, formatCurrency, cn, formatDateTime, formatTime } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { useState, useMemo, FormEvent, useEffect } from 'react';
+import { useState, useMemo, FormEvent, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useParams, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { doc, getDocFromServer } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, storage } from '../lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { UserAvatar } from './Avatar';
 import QRCode from 'qrcode';
 
 export default function TripDetail() {
   const { user } = useAuth();
-  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, withdrawJoinRequest, updateChecklistItem, updateTripSettings, setActiveTripId, joinTrip, loading } = useTrip();
+  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, withdrawJoinRequest, updateChecklistItem, updateTripSettings, setActiveTripId, joinTrip, loading, deleteTrip } = useTrip();
   const { tripId } = useParams();
   const navigate = useNavigate();
 
@@ -208,6 +209,85 @@ export default function TripDetail() {
   const [customParticipants, setCustomParticipants] = useState<string[]>([]);
   const [receiptImage, setReceiptImage] = useState<string | null>(null);
   const [previewReceipt, setPreviewReceipt] = useState<string | null>(null);
+
+  // Local storage cache helpers to avoid bloating Firestore and getting stuck
+  const saveReceiptToLocal = (key: string, base64Data: string) => {
+    try {
+      localStorage.setItem(key, base64Data);
+    } catch (e) {
+      console.warn("localStorage quota exceeded, clearing older receipts...", e);
+      try {
+        const keys = Object.keys(localStorage);
+        const receiptKeys = keys.filter(k => k.startsWith('local_receipt_ref_'));
+        receiptKeys.sort();
+        const keysToRemove = receiptKeys.slice(0, Math.floor(receiptKeys.length / 2));
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+        localStorage.setItem(key, base64Data);
+      } catch (innerErr) {
+        console.error("Failed to write to localStorage even after cleanup", innerErr);
+      }
+    }
+  };
+
+  const getReceiptData = (url: string | null): string => {
+    if (!url) return '';
+    if (url.startsWith('local_receipt_ref_')) {
+      return localStorage.getItem(url) || '';
+    }
+    return url;
+  };
+
+  const isPdfReceipt = (url: string | null): boolean => {
+    if (!url) return false;
+    return url.includes('_pdf') || url.includes('application/pdf') || url.toLowerCase().includes('.pdf');
+  };
+
+  const handleOpenDocument = (url: string | null) => {
+    if (!url) return;
+    const realData = getReceiptData(url);
+    if (realData.startsWith('data:')) {
+      try {
+        const base64Parts = realData.split(';base64,');
+        let actualBase64 = realData;
+        let mimeType = isPdfReceipt(url) ? 'application/pdf' : 'image/jpeg';
+        
+        if (base64Parts.length === 2) {
+          mimeType = base64Parts[0].replace('data:', '');
+          actualBase64 = base64Parts[1];
+        } else {
+          const mimeMatch = realData.match(/data:([^;]+);/);
+          if (mimeMatch) mimeType = mimeMatch[1];
+        }
+
+        const byteCharacters = atob(actualBase64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+        const fileURL = URL.createObjectURL(blob);
+        window.open(fileURL, '_blank');
+      } catch (err) {
+        console.error("Failed to open data URL securely in new tab:", err);
+        const win = window.open();
+        if (win) {
+          win.document.write(`<iframe src="${realData}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+        }
+      }
+    } else {
+      window.open(realData, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  // PDF Document and camera upload states and refs
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [receiptFileName, setReceiptFileName] = useState<string | null>(null);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [newExpense, setNewExpense] = useState({ 
     description: '', 
     amount: 0, 
@@ -340,18 +420,170 @@ export default function TripDetail() {
   const isOwner = activeTrip?.ownerId === user?.uid;
   const canEdit = isOwner || (activeTrip?.allowTravellerEdits !== false && currentUserMember?.role === 'editor');
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 1024 * 1024) { // 1MB limit for base64
-        alert("File size should be less than 1MB");
+  // Camera stream cleanup on unmount or stream change
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [cameraStream]);
+
+  const compressImage = (file: File): Promise<Blob | File> => {
+    return new Promise((resolve) => {
+      if (!file.type.startsWith('image/')) {
+        resolve(file); // PDF or other document format
         return;
       }
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setReceiptImage(reader.result as string);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const MAX_WIDTH = 800; // Optimal width for fast receipts upload
+          const MAX_HEIGHT = 800; // Optimal height for fast receipts upload
+          
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            canvas.toBlob((blob) => {
+              if (blob) {
+                const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", {
+                  type: 'image/jpeg',
+                  lastModified: Date.now()
+                });
+                resolve(compressedFile);
+              } else {
+                resolve(file);
+              }
+            }, 'image/jpeg', 0.65); // 65% quality is highly compressed yet extremely readable
+          } else {
+            resolve(file);
+          }
+        };
+        img.src = event.target?.result as string;
       };
       reader.readAsDataURL(file);
+    });
+  };
+
+  const handleFileUpload = async (file: File) => {
+    if (!activeTrip) return;
+    setIsUploadingFile(true);
+    setReceiptFileName(file.name);
+    
+    try {
+      // Compress first if it's an image
+      const compressedFile = await compressImage(file);
+      
+      // Step 1: Immediately read the file/compressed image as local Base64
+      // This happens under 100ms, immediately updating the UI and unlocking form submission!
+      const localBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(compressedFile);
+      });
+      
+      // Generate a unique local cache reference key so we do NOT write megabytes of raw Base64 data directly to Firestore
+      const isPdf = !file.type.startsWith('image/') || file.name.slice(-4).toLowerCase() === '.pdf';
+      const localKey = `local_receipt_ref_${Date.now()}_${isPdf ? 'pdf' : 'img'}`;
+      
+      // Cache the full image/PDF data locally on this browser
+      saveReceiptToLocal(localKey, localBase64);
+      
+      // Instantly set the receipt image state to the tiny 30-character reference key.
+      // This enables instant form submission without any delays, network congestion, or Firestore document size limits!
+      setReceiptImage(localKey);
+      setIsUploadingFile(false);
+      
+      // Step 2: Attempt uploading the file to Firebase Cloud Storage in the background.
+      // If it succeeds within 4 seconds, we will securely swap the local reference key for the synced Cloud Storage URL.
+      try {
+        const uploadPromise = (async () => {
+          const fileRef = ref(storage, `trips/${activeTrip.id}/receipts/${Date.now()}_${(compressedFile as any).name || file.name}`);
+          await uploadBytes(fileRef, compressedFile);
+          const downloadUrl = await getDownloadURL(fileRef);
+          return downloadUrl;
+        })();
+        
+        const timeoutPromise = new Promise<null>((_, reject) => {
+          setTimeout(() => reject(new Error("Upload timeout")), 4000);
+        });
+        
+        const cloudUrl = await Promise.race([uploadPromise, timeoutPromise]);
+        if (cloudUrl) {
+          setReceiptImage(cloudUrl);
+          console.log("Background cloud storage upload succeeded, swapped local ref with synced Cloud URL:", cloudUrl);
+        }
+      } catch (bgError) {
+        console.warn("Background upload timed out or offline, keeping ultra-fast local base64 fallback key:", bgError);
+      }
+    } catch (error: any) {
+      console.error("File upload failed:", error);
+      toast.error("Failed to read file.");
+      setIsUploadingFile(false);
+      setReceiptFileName(null);
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      setIsCameraActive(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      setCameraStream(stream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Camera streaming failed, using direct device camera capture fallback:", err);
+      // Fallback: trigger hidden native camera capture element
+      cameraInputRef.current?.click();
+      setIsCameraActive(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setIsCameraActive(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const video = videoRef.current;
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const file = new File([blob], `camera_receipt_${Date.now()}.jpg`, { type: 'image/jpeg' });
+            handleFileUpload(file);
+          }
+          stopCamera();
+        }, 'image/jpeg', 0.85);
+      }
     }
   };
 
@@ -397,6 +629,7 @@ export default function TripDetail() {
     setSplitOption('all');
     setCustomParticipants([]);
     setReceiptImage(null);
+    setReceiptFileName(null);
     setNewExpense({ description: '', amount: 0, category: 'Food', date: new Date().toISOString().split('T')[0], time: '', payerId: user?.uid || '' });
     setCustomCategory('');
   };
@@ -1008,7 +1241,7 @@ export default function TripDetail() {
                                 {item.completed && item.completedAt && (
                                   <div className="flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-widest text-emerald-600 dark:text-emerald-500">
                                     <CheckCircle2 className="w-2.5 h-2.5" />
-                                    Closed @ {formatDateTime(item.completedAt.toDate())}
+                                    Closed by {item.completedByName || 'Member'} @ {item.completedAt?.toDate ? formatDateTime(item.completedAt.toDate()) : 'Now'}
                                   </div>
                                 )}
                               </div>
@@ -1225,13 +1458,17 @@ export default function TripDetail() {
                       <div>
                         <h5 className="text-sm md:text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
                           {expense.description}
-                          {expense.receiptUrl && (
+                           {expense.receiptUrl && (
                             <button 
                               onClick={() => setPreviewReceipt(expense.receiptUrl!)}
                               className="text-slate-400 hover:text-orange-500 transition-colors"
-                              title="View Receipt"
+                              title={isPdfReceipt(expense.receiptUrl) ? "View PDF Receipt" : "View Image Receipt"}
                             >
-                              <ImageIcon className="w-4 h-4" />
+                              {isPdfReceipt(expense.receiptUrl) ? (
+                                <FileText className="w-4 h-4" />
+                              ) : (
+                                <ImageIcon className="w-4 h-4" />
+                              )}
                             </button>
                           )}
                         </h5>
@@ -1263,6 +1500,15 @@ export default function TripDetail() {
                             <span className="px-2 py-0.5 rounded-full bg-orange-50 dark:bg-orange-950/20 text-orange-600 dark:text-orange-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> Shared with {expense.participants?.length || activeTrip?.members?.length || 0}
                             </span>
+                          )}
+                          {expense.receiptUrl && (
+                            <button 
+                              onClick={() => setPreviewReceipt(expense.receiptUrl!)}
+                              className="px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-emerald-100 dark:border-emerald-900/10"
+                              title="Click to view full receipt"
+                            >
+                              <Receipt className="w-2.5 h-2.5" /> View Receipt
+                            </button>
                           )}
                         </div>
                       </div>
@@ -1620,31 +1866,119 @@ export default function TripDetail() {
                 </AnimatePresence>
 
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 pt-2">Receipt Image (Optional, max 1MB)</label>
-                  <div className="flex items-center gap-4">
-                    <label className="flex items-center justify-center w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-pointer hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
-                      <ImageIcon className="w-5 h-5" />
-                      <input 
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleImageUpload}
-                      />
-                    </label>
-                    {receiptImage && (
-                      <div className="relative group">
-                        <img src={receiptImage} alt="Receipt preview" className="h-12 w-12 object-cover rounded-xl border border-slate-200 dark:border-slate-700" />
-                        <button 
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 pt-2">Receipt Document or Photo (Optional)</label>
+                  
+                  {isCameraActive ? (
+                    <div className="space-y-3 p-4 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-dashed border-slate-300 dark:border-slate-700">
+                      <div className="relative aspect-video rounded-xl overflow-hidden bg-black shrink-0">
+                        <video 
+                          ref={videoRef} 
+                          autoPlay 
+                          playsInline 
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent flex items-end justify-center pb-4 gap-4">
+                          <button
+                            type="button"
+                            onClick={capturePhoto}
+                            className="h-10 px-5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-full uppercase tracking-wider shadow-md transition-all active:scale-95"
+                          >
+                            Capture Photo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={stopCamera}
+                            className="h-10 px-5 bg-slate-800 border border-slate-600 text-white text-xs font-bold rounded-full uppercase tracking-wider shadow-md transition-all active:scale-95 hover:bg-slate-700"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center gap-3">
+                        {/* Hidden Inputs */}
+                        <input 
+                          type="file"
+                          accept="image/*,application/pdf"
+                          className="hidden"
+                          ref={fileInputRef}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFileUpload(file);
+                          }}
+                        />
+                        <input 
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden"
+                          ref={cameraInputRef}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFileUpload(file);
+                          }}
+                        />
+
+                        {/* Upload Trigger Buttons */}
+                        <button
                           type="button"
-                          onClick={() => setReceiptImage(null)}
-                          className="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full p-1 opacity-100 sm:opacity-0 group-hover:opacity-100 shadow-sm transition-opacity"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex-1 h-12 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-750 transition-colors flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider"
                         >
-                          <X className="w-3 h-3" />
+                          <FileText className="w-4 h-4" />
+                          <span>Attach Document / PDF</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={startCamera}
+                          className="h-12 w-12 shrink-0 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-750 transition-colors flex items-center justify-center"
+                          title="Attach from Camera"
+                        >
+                          <Camera className="w-5 h-5" />
                         </button>
                       </div>
-                    )}
-                    {!receiptImage && <span className="text-[10px] text-slate-400">Attach receipt</span>}
-                  </div>
+
+                      {/* Display Uploading Status or Preview */}
+                      {isUploadingFile && (
+                        <div className="flex items-center gap-2 text-xs text-orange-500 font-bold uppercase tracking-widest pl-1 mt-1">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Uploading receipt to Storage...</span>
+                        </div>
+                      )}
+
+                      {receiptImage && (
+                        <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-850 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-white">
+                          <div className="flex items-center gap-2.5 min-w-0 font-medium">
+                            {isPdfReceipt(receiptImage) || receiptFileName?.toLowerCase().includes('.pdf') ? (
+                              <div className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-950/30 flex items-center justify-center border border-red-100/50 dark:border-red-900/20 text-red-500 shrink-0">
+                                <FileText className="w-5 h-5" />
+                              </div>
+                            ) : (
+                              <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-750 bg-black">
+                                <img src={getReceiptData(receiptImage)} alt="Receipt preview" className="w-full h-full object-cover" />
+                              </div>
+                            )}
+                            <span className="text-xs font-bold truncate pr-3 max-w-[180px] dark:text-white">
+                              {receiptFileName || "Attached Receipt"}
+                            </span>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              setReceiptImage(null);
+                              setReceiptFileName(null);
+                            }}
+                            className="p-1 hover:bg-slate-200 dark:hover:bg-slate-750 rounded-full text-slate-400 hover:text-rose-500 dark:hover:text-white transition-colors"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 
                 <div>
@@ -1843,28 +2177,51 @@ export default function TripDetail() {
                   <p className="mt-3 text-[10px] text-orange-600/70 font-medium leading-relaxed mb-4">Share this ID with other nomads to have them join this trip's ledger system.</p>
                   
                   {isOwner && (
-                    <div className="mt-4 pt-4 border-t border-orange-100 dark:border-orange-500/10 flex items-center justify-between">
-                      <div className="pr-4">
-                        <span className="text-[10px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block mb-0.5">Traveler Write Settings</span>
-                        <span className="text-[9px] text-slate-400 font-medium block leading-relaxed">
-                          Allow joined travelers to add expenses, make checklist updates, and modify objectives.
-                        </span>
+                    <>
+                      <div className="mt-4 pt-4 border-t border-orange-100 dark:border-orange-500/10 flex items-center justify-between">
+                        <div className="pr-4">
+                          <span className="text-[10px] font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider block mb-0.5">Traveler Write Settings</span>
+                          <span className="text-[9px] text-slate-400 font-medium block leading-relaxed">
+                            Allow joined travelers to add expenses, make checklist updates, and modify objectives.
+                          </span>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            const newVal = activeTrip.allowTravellerEdits !== false ? false : true;
+                            await updateTripSettings(activeTrip.id, { allowTravellerEdits: newVal });
+                          }}
+                          className={cn(
+                            "px-4 py-2 text-[9px] font-black uppercase tracking-wider rounded-xl transition-all shadow-sm shrink-0 border",
+                            activeTrip.allowTravellerEdits !== false
+                              ? "bg-slate-900 dark:bg-orange-600 text-white border-transparent"
+                              : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700"
+                          )}
+                        >
+                          {activeTrip.allowTravellerEdits !== false ? "Editor" : "Read-Only"}
+                        </button>
                       </div>
-                      <button
-                        onClick={async () => {
-                          const newVal = activeTrip.allowTravellerEdits !== false ? false : true;
-                          await updateTripSettings(activeTrip.id, { allowTravellerEdits: newVal });
-                        }}
-                        className={cn(
-                          "px-4 py-2 text-[9px] font-black uppercase tracking-wider rounded-xl transition-all shadow-sm shrink-0 border",
-                          activeTrip.allowTravellerEdits !== false
-                            ? "bg-slate-900 dark:bg-orange-600 text-white border-transparent"
-                            : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700"
-                        )}
-                      >
-                        {activeTrip.allowTravellerEdits !== false ? "Editor" : "Read-Only"}
-                      </button>
-                    </div>
+
+                      <div className="mt-4 pt-4 border-t border-rose-100 dark:border-rose-950/20 flex items-center justify-between">
+                        <div className="pr-4">
+                          <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-wider block mb-0.5">Danger Zone</span>
+                          <span className="text-[9px] text-slate-400 font-medium block leading-relaxed">
+                            Permanently delete this trip if it contains no expense records.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (window.confirm("Are you sure you want to delete this trip? This action is irreversible.")) {
+                              await deleteTrip(activeTrip.id);
+                              navigate('/');
+                            }
+                          }}
+                          className="px-4 py-2 text-[9px] font-black uppercase tracking-wider rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30 transition-all shadow-sm shrink-0"
+                        >
+                          Delete Trip
+                        </button>
+                      </div>
+                    </>
                   )}
                   
                   {qrUrl && (
@@ -2001,11 +2358,43 @@ export default function TripDetail() {
                 <X className="w-5 h-5" />
               </button>
               <h2 className="text-xl font-black mb-6 dark:text-white flex items-center gap-3">
-                <ImageIcon className="w-6 h-6 text-orange-500" />
+                {isPdfReceipt(previewReceipt) ? (
+                  <FileText className="w-6 h-6 text-orange-500" />
+                ) : (
+                  <ImageIcon className="w-6 h-6 text-orange-500" />
+                )}
                 Receipt
               </h2>
-              <div className="flex justify-center w-full max-h-[60vh] overflow-auto rounded-xl">
-                <img src={previewReceipt} alt="Receipt" className="max-w-full object-contain rounded-xl" />
+              <div className="flex flex-col gap-4 w-full">
+                <div className="flex justify-center w-full max-h-[50vh] min-h-[300px] overflow-auto rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/20">
+                  {isPdfReceipt(previewReceipt) ? (
+                    <div className="flex flex-col items-center justify-center p-8 text-center w-full">
+                      <div className="w-16 h-16 rounded-2xl bg-orange-500/10 flex items-center justify-center text-orange-500 mb-4 shadow-sm">
+                        <FileText className="w-8 h-8" />
+                      </div>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-2">Secure PDF Receipt Document</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 max-w-xs leading-relaxed">
+                        Modern secure browsers prevent loading PDF files inside of nested sandbox frames. Open the document directly below to view it safely in a fresh window.
+                      </p>
+                      <button 
+                        onClick={() => handleOpenDocument(previewReceipt)}
+                        className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md inline-flex items-center gap-2 active:scale-95 cursor-pointer"
+                      >
+                        Open PDF in New Tab <ExternalLink className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <img src={getReceiptData(previewReceipt)} alt="Receipt" className="max-w-full h-auto object-contain rounded-xl" />
+                  )}
+                </div>
+                <div className="flex justify-end">
+                  <button 
+                    onClick={() => handleOpenDocument(previewReceipt)}
+                    className="text-xs font-bold text-orange-500 hover:text-orange-600 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    Open in New Tab <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>

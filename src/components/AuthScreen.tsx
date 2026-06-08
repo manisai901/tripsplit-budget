@@ -1,7 +1,7 @@
 import { Plane, Globe, Compass, Wallet, AlertCircle, Moon, Sun, MapPin, BookOpen, ShieldCheck, CheckCircle, Mail, Github, Twitter, Shield } from 'lucide-react';
 import { loginWithGoogle } from '../lib/firebase';
 import { motion, AnimatePresence } from 'motion/react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 
 interface AuthScreenProps {
@@ -11,10 +11,48 @@ interface AuthScreenProps {
 
 export default function AuthScreen({ theme, setTheme }: AuthScreenProps) {
   const [error, setError] = useState<string | null>(null);
+  const [cooldownRemaining, setCooldownRemaining] = useState<number>(0);
+
+  // Monitor and tick active countdowns
+  useEffect(() => {
+    if (cooldownRemaining <= 0) return;
+    const timer = setInterval(() => {
+      setCooldownRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldownRemaining]);
 
   const handleLogin = async () => {
+    if (cooldownRemaining > 0) {
+      setError(`Auth system is rate-limited. Please wait ${cooldownRemaining}s before attempting to sign in.`);
+      return;
+    }
+
     try {
       setError(null);
+      const now = Date.now();
+      const rawAttempts = localStorage.getItem('traveler_login_attempts');
+      let attempts: number[] = rawAttempts ? JSON.parse(rawAttempts) : [];
+
+      // Filter out stamps older than 60 seconds
+      attempts = attempts.filter(t => now - t < 60000);
+
+      if (attempts.length >= 3) {
+        const backoffLimit = 15; // 15 seconds rate limit block
+        setCooldownRemaining(backoffLimit);
+        setError(`Too many authentication requests. Rate limit triggered. Please wait ${backoffLimit}s before retrying.`);
+        return;
+      }
+
+      attempts.push(now);
+      localStorage.setItem('traveler_login_attempts', JSON.stringify(attempts));
+
       await loginWithGoogle();
     } catch (err: any) {
       console.error('Login error:', err);

@@ -14,7 +14,8 @@ import {
   serverTimestamp,
   arrayUnion,
   arrayRemove,
-  getDocFromServer
+  getDocFromServer,
+  getDocs
 } from 'firebase/firestore';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useAuth } from './AuthContext';
@@ -54,6 +55,8 @@ interface ChecklistItem {
   completedAt?: any;
   dueTime?: string;
   modifiedCount?: number;
+  completedBy?: string;
+  completedByName?: string;
 }
 
 interface Expense {
@@ -92,6 +95,7 @@ interface TripContextType {
   withdrawJoinRequest: (tripId: string) => Promise<void>;
   updateChecklistItem: (tripId: string, itemId: string, newText: string, newDueTime?: string) => Promise<void>;
   updateTripSettings: (tripId: string, settings: Partial<Trip>) => Promise<void>;
+  deleteTrip: (tripId: string) => Promise<void>;
 }
 
 const TripContext = createContext<TripContextType | undefined>(undefined);
@@ -337,7 +341,9 @@ export function TripProvider({ children }: { children: ReactNode }) {
       checkWriteAccess(tripId);
       await updateDoc(doc(db, 'trips', tripId, 'checklist', itemId), {
         completed,
-        completedAt: completed ? serverTimestamp() : null
+        completedAt: completed ? serverTimestamp() : null,
+        completedBy: completed ? (user?.uid || null) : null,
+        completedByName: completed ? (user?.displayName || null) : null
       });
     } catch (error: any) {
       handleFirestoreError(error, OperationType.UPDATE, `trips/${tripId}/checklist/${itemId}`);
@@ -444,6 +450,47 @@ export function TripProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const deleteTrip = async (tripId: string) => {
+    if (!user) return;
+    try {
+      const trip = trips.find(t => t.id === tripId);
+      if (!trip) throw new Error('Trip not found');
+      if (trip.ownerId !== user.uid) {
+        throw new Error('Only the organizer/owner can delete this trip.');
+      }
+
+      // Check if there are any transaction records (expenses) in this trip
+      const expensesRef = collection(db, 'trips', tripId, 'expenses');
+      const expensesSnap = await getDocs(expensesRef);
+      if (!expensesSnap.empty) {
+        throw new Error('This trip contains transaction records (expenses) and cannot be deleted.');
+      }
+
+      // Sync local order: remove from localStorage
+      const storedOrderStr = localStorage.getItem(`trip_order_${user.uid}`);
+      if (storedOrderStr) {
+        try {
+          const storedOrder: string[] = JSON.parse(storedOrderStr);
+          const updatedOrder = storedOrder.filter(id => id !== tripId);
+          localStorage.setItem(`trip_order_${user.uid}`, JSON.stringify(updatedOrder));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      // If no expenses exist, proceed to delete the trip doc
+      await deleteDoc(doc(db, 'trips', tripId));
+
+      if (activeTripId === tripId) {
+        setActiveTripId(null);
+      }
+      toast.success('Trip deleted successfully!');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.DELETE, `trips/${tripId}`);
+      toast.error(error.message || 'Failed to delete trip');
+    }
+  };
+
   const value = useMemo(() => ({ 
     trips, 
     activeTrip, 
@@ -463,7 +510,8 @@ export function TripProvider({ children }: { children: ReactNode }) {
     approveMember,
     withdrawJoinRequest,
     updateChecklistItem,
-    updateTripSettings
+    updateTripSettings,
+    deleteTrip
   }), [
     trips, 
     activeTrip, 
