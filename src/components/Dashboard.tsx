@@ -4,15 +4,81 @@ import { useAuth } from '../context/AuthContext';
 import { formatDate, formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
 import { useState, FormEvent, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { UserAvatar } from './Avatar';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const { trips, createTrip, joinTrip, setActiveTripId, indexErrorUrl, isIndexBuilding, loading } = useTrip();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
+
+  // Sync state to URL for back-button support
+  useEffect(() => {
+    const modal = searchParams.get('modal');
+    if (!modal) {
+      setIsCreating(false);
+      setIsJoining(false);
+    } else {
+      if (modal === 'create') setIsCreating(true);
+      if (modal === 'join') setIsJoining(true);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const modal = searchParams.get('modal');
+    if (isCreating && modal !== 'create') setSearchParams({ modal: 'create' });
+    else if (isJoining && modal !== 'join') setSearchParams({ modal: 'join' });
+    else if (!isCreating && !isJoining && modal) {
+      // Handled by manual close now
+    }
+  }, [isCreating, isJoining]);
+
+  const closeModal = () => {
+    if (searchParams.get('modal')) {
+      navigate(-1);
+    } else {
+      setIsCreating(false);
+      setIsJoining(false);
+    }
+  };
+
+  // Hardware back button safety (prevents app closure on single back press from dashboard root)
+  useEffect(() => {
+    // Only apply if it's the home view
+    const handlePopState = (e: PopStateEvent) => {
+      if (window.location.pathname === '/' && !searchParams.get('modal')) {
+        // If the user hit back on the dashboard with no modal open
+        // We push a "stay" state to handle the next pop as an exit if they repeat quickly
+        // But for web, we just want to ensure we don't close the tab if we came from within the app.
+        // Actually, if we are at the bottom of the stack, hitting back will exit.
+      }
+    };
+
+    // A common PWA pattern is to push a "landing" state
+    if (window.history.length <= 2 && !window.history.state?.isLanding) {
+       window.history.replaceState({ isLanding: true }, '');
+       window.history.pushState({ isApp: true }, '');
+    }
+
+    const onPop = (e: PopStateEvent) => {
+      if (e.state?.isLanding) {
+        toast("Press back again to exit", { 
+          icon: "🏠",
+          description: "Returning next time? Your journeys are safe.",
+          duration: 2000 
+        });
+        // We stay by pushing the app state back
+        window.history.pushState({ isApp: true }, '');
+      }
+    };
+
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [searchParams]);
   const [joinId, setJoinId] = useState('');
   const [newTrip, setNewTrip] = useState({ name: '', destination: '', budget: 0, currency: 'INR' });
 
@@ -112,7 +178,7 @@ export default function Dashboard() {
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     await createTrip(newTrip);
-    setIsCreating(false);
+    closeModal();
     setNewTrip({ name: '', destination: '', budget: 0, currency: 'INR' });
   };
 
@@ -120,7 +186,7 @@ export default function Dashboard() {
     e.preventDefault();
     if (!joinId.trim()) return;
     await joinTrip(joinId.trim());
-    setIsJoining(false);
+    closeModal();
     setJoinId('');
   };
 
@@ -397,7 +463,7 @@ export default function Dashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="absolute inset-0 bg-black/60 backdrop-blur-md"
-            onClick={() => setIsJoining(false)}
+            onClick={closeModal}
           />
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
@@ -436,7 +502,7 @@ export default function Dashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="absolute inset-0 bg-black/60 backdrop-blur-md"
-            onClick={() => setIsCreating(false)}
+            onClick={closeModal}
           />
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}

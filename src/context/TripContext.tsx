@@ -72,6 +72,7 @@ interface Expense {
   createdAt: any;
   createdByName: string;
   receiptUrl?: string;
+  receiptStoragePath?: string;
   time?: string;
 }
 
