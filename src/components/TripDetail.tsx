@@ -225,6 +225,15 @@ export default function TripDetail() {
     }
 
     if (previewStoragePath) {
+      const isLocalRef = previewReceipt && previewReceipt.startsWith('local_receipt_ref_');
+      const hasLocalCopy = isLocalRef && !!localStorage.getItem(previewReceipt);
+      
+      if (hasLocalCopy) {
+        setFreshPreviewUrl(previewReceipt);
+        setIsPreviewRefreshing(false);
+        return;
+      }
+
       setIsPreviewRefreshing(true);
       const fileRef = ref(storage, previewStoragePath);
       getDownloadURL(fileRef)
@@ -233,7 +242,11 @@ export default function TripDetail() {
           setIsPreviewRefreshing(false);
         })
         .catch(err => {
-          console.error("Failed to refresh preview URL:", err);
+          if (err && (err.code === 'storage/retry-limit-exceeded' || String(err).includes('retry-limit-exceeded'))) {
+            console.warn("Storage is offline or unprovisioned. Using local fallback for receipt preview.");
+          } else {
+            console.warn("Could not refresh preview URL:", err);
+          }
           setFreshPreviewUrl(previewReceipt); // Fallback
           setIsPreviewRefreshing(false);
         });
@@ -343,14 +356,35 @@ export default function TripDetail() {
     return url;
   };
 
-  const isPdfReceipt = (url: string | null): boolean => {
-    if (!url) return false;
-    const lower = url.toLowerCase();
-    return lower.includes('application/pdf') || 
-           lower.includes('.pdf') || 
-           lower.includes('_pdf') ||
-           lower.includes('data:pdf') ||
-           url.startsWith('data:application/pdf');
+  const isValidPreviewUrl = (url: string | null | undefined): boolean => {
+    if (!url || url === 'fetching_preview') return false;
+    const resolved = getReceiptData(url);
+    if (!resolved) return false;
+    return resolved.startsWith('data:') || resolved.startsWith('http://') || resolved.startsWith('https://');
+  };
+
+  const isPdfReceipt = (url: string | null | undefined, storagePath?: string | null | undefined): boolean => {
+    if (!url && !storagePath) return false;
+    const targets: string[] = [];
+    if (url) {
+      targets.push(url.toLowerCase());
+      if (url.startsWith('local_receipt_ref_')) {
+        const localData = localStorage.getItem(url);
+        if (localData) {
+          targets.push(localData.toLowerCase());
+        }
+      }
+    }
+    if (storagePath) targets.push(storagePath.toLowerCase());
+    
+    return targets.some(target => 
+      target.includes('application/pdf') || 
+      target.includes('.pdf') || 
+      target.includes('_pdf') ||
+      target.includes('data:pdf') ||
+      target.startsWith('data:application/pdf') ||
+      target === 'pdf_placeholder'
+    );
   };
 
   const handleOpenDocument = async (url: string | null, storagePath?: string | null) => {
@@ -358,7 +392,7 @@ export default function TripDetail() {
     if (!targetUrl && !storagePath) return;
     
     // Check if it's a PDF
-    const isPdf = isPdfReceipt(targetUrl);
+    const isPdf = isPdfReceipt(targetUrl, storagePath);
     
     // If we have a direct public cloud URL and it's NOT a PDF, open immediately.
     // (PDFs are better handled via blob conversion for consistent mobile/desktop behavior)
@@ -409,17 +443,24 @@ export default function TripDetail() {
 
     let realUrl = targetUrl;
     
-    // Fetch if missing or only local ref
-    if (storagePath && (!realUrl || realUrl.startsWith('local_receipt_ref_'))) {
+    // Fetch if missing, only local ref (that isn't cached), or legacy 'pdf_placeholder'
+    const isLocalRef = realUrl && realUrl.startsWith('local_receipt_ref_');
+    const hasLocalCopy = isLocalRef && !!localStorage.getItem(realUrl);
+    
+    if (storagePath && (!realUrl || (isLocalRef && !hasLocalCopy) || realUrl === 'pdf_placeholder')) {
       try {
         const fileRef = ref(storage, storagePath);
         realUrl = await getDownloadURL(fileRef);
-      } catch (err) {
-        console.error("Failed to get fresh download URL:", err);
+      } catch (err: any) {
+        if (err && (err.code === 'storage/retry-limit-exceeded' || String(err).includes('retry-limit-exceeded'))) {
+          console.warn("Storage is offline or unprovisioned. Using local fallback for open document.");
+        } else {
+          console.warn("Could not get fresh download URL:", err);
+        }
       }
     }
 
-    if (!realUrl) {
+    if (!realUrl || realUrl === 'pdf_placeholder') {
       newWin.document.body.innerHTML = '<div style="color:#ef4444; font-family:sans-serif; text-align:center; padding:20px;">Receipt not found. Link may have expired.</div>';
       setTimeout(() => newWin.close(), 3000);
       toast.error("Document link expired.");
@@ -427,7 +468,7 @@ export default function TripDetail() {
     }
     
     const realData = getReceiptData(realUrl);
-    const finalIsPdf = isPdfReceipt(realUrl);
+    const finalIsPdf = isPdfReceipt(realUrl, storagePath);
 
     if (finalIsPdf && realData.startsWith('data:')) {
       try {
@@ -671,17 +712,13 @@ export default function TripDetail() {
     setReceiptStoragePath(storagePath);
     
     // 2. Show instant preview
-    if (isPdf) {
-      setReceiptImage('pdf_placeholder');
-    } else {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const localKey = `local_receipt_ref_${Date.now()}`;
-        saveReceiptToLocal(localKey, reader.result as string);
-        setReceiptImage(localKey);
-      };
-      reader.readAsDataURL(file);
-    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const localKey = `local_receipt_ref_${Date.now()}`;
+      saveReceiptToLocal(localKey, reader.result as string);
+      setReceiptImage(localKey);
+    };
+    reader.readAsDataURL(file);
 
     // 3. Background upload - completely non-blocking but tracks status
     setIsUploadingFile(true);
@@ -700,7 +737,11 @@ export default function TripDetail() {
           uploadTask.on('state_changed', 
             null,
             (error) => {
-              console.error("Storage upload task failed:", error);
+              if (error && (error.code === 'storage/retry-limit-exceeded' || String(error).includes('retry-limit-exceeded'))) {
+                console.warn("Storage upload task failed (offline/unprovisioned storage):", error);
+              } else {
+                console.error("Storage upload task failed:", error);
+              }
               reject(error);
             },
             async () => {
@@ -716,9 +757,13 @@ export default function TripDetail() {
         });
 
         await pendingUploadRef.current;
-      } catch (err) {
-        console.error("Background upload failed:", err);
-        toast.error("Cloud document sync failed. Using local copy for now.");
+      } catch (err: any) {
+        if (err && (err.code === 'storage/retry-limit-exceeded' || String(err).includes('retry-limit-exceeded'))) {
+          console.warn("Background upload failed (offline/unprovisioned storage):", err);
+        } else {
+          console.error("Background upload failed:", err);
+          toast.error("Cloud document sync failed. Using local copy for now.");
+        }
       } finally {
         setIsUploadingFile(false);
         pendingUploadRef.current = null;
@@ -807,8 +852,12 @@ export default function TripDetail() {
         const result = await pendingUploadRef.current;
         finalReceiptUrl = result.url;
         toast.dismiss(waitToast);
-      } catch (err) {
-        console.error("Pending upload wait failed:", err);
+      } catch (err: any) {
+        if (err && (err.code === 'storage/retry-limit-exceeded' || String(err).includes('retry-limit-exceeded'))) {
+          console.warn("Pending upload wait failed (offline/unprovisioned storage):", err);
+        } else {
+          console.error("Pending upload wait failed:", err);
+        }
         toast.dismiss(waitToast);
       }
     }
@@ -823,7 +872,12 @@ export default function TripDetail() {
     }
 
     if (finalReceiptUrl && finalReceiptUrl.startsWith('local_receipt_ref_')) {
-      finalReceiptUrl = null;
+      const base64Data = localStorage.getItem(finalReceiptUrl);
+      if (base64Data) {
+        finalReceiptUrl = base64Data;
+      } else {
+        finalReceiptUrl = null;
+      }
     }
     
     await addExpense(activeTrip.id, {
@@ -1717,16 +1771,20 @@ export default function TripDetail() {
                              {(expense.receiptUrl || expense.receiptStoragePath) && (
                             <button 
                               onClick={() => {
-                                setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
-                                setPreviewStoragePath(expense.receiptStoragePath);
+                                if (isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath)) {
+                                  handleOpenDocument(expense.receiptUrl || null, expense.receiptStoragePath);
+                                } else {
+                                  setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
+                                  setPreviewStoragePath(expense.receiptStoragePath);
+                                }
                               }}
                               className="text-slate-400 hover:text-orange-500 transition-colors"
-                              title={isPdfReceipt(expense.receiptUrl) ? "View PDF Receipt" : "View Image Receipt"}
+                              title={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? "Open PDF Document in a new tab" : "View Image Receipt"}
                             >
-                              {isPdfReceipt(expense.receiptUrl) ? (
-                                <FileText className="w-4 h-4" />
+                              {isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? (
+                                <FileText className="w-4 h-4 text-rose-500 hover:scale-110 transition-all" />
                               ) : (
-                                <ImageIcon className="w-4 h-4" />
+                                <ImageIcon className="w-4 h-4 text-emerald-500 hover:scale-110 transition-all" />
                               )}
                             </button>
                           )}
@@ -1760,16 +1818,31 @@ export default function TripDetail() {
                               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> Shared with {expense.participants?.length || activeTrip?.members?.length || 0}
                             </span>
                           )}
-                          {(expense.receiptUrl || expense.receiptStoragePath) && (
+                           {(expense.receiptUrl || expense.receiptStoragePath) && (
                             <button 
                               onClick={() => {
-                                setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
-                                setPreviewStoragePath(expense.receiptStoragePath);
+                                if (isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath)) {
+                                  handleOpenDocument(expense.receiptUrl || null, expense.receiptStoragePath);
+                                } else {
+                                  setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
+                                  setPreviewStoragePath(expense.receiptStoragePath);
+                                }
                               }}
-                              className="px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-emerald-100 dark:border-emerald-900/10"
-                              title="Click to view full receipt"
+                              className={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath)
+                                ? "px-2 py-0.5 rounded-full bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-950/50 text-rose-600 dark:text-rose-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-rose-100 dark:border-rose-900/10 hover:scale-105"
+                                : "px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-emerald-100 dark:border-emerald-900/10 hover:scale-105"
+                              }
+                              title={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? "Click to open PDF receipt in a new browser tab for everyone" : "Click to view image receipt details"}
                             >
-                              <Receipt className="w-2.5 h-2.5" /> View Receipt
+                              {isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? (
+                                <>
+                                  <FileText className="w-2.5 h-2.5 text-rose-500" /> PDF Receipt
+                                </>
+                              ) : (
+                                <>
+                                  <Receipt className="w-2.5 h-2.5 text-emerald-500" /> View Receipt
+                                </>
+                              )}
                             </button>
                           )}
                         </div>
@@ -2225,11 +2298,15 @@ export default function TripDetail() {
                           <div 
                             className="flex items-center gap-2.5 min-w-0 font-medium cursor-pointer group/preview"
                             onClick={() => {
-                              setPreviewReceipt(receiptImage);
-                              setPreviewStoragePath(receiptStoragePath);
+                              if (isPdfReceipt(receiptImage, receiptStoragePath) || receiptFileName?.toLowerCase().includes('.pdf')) {
+                                handleOpenDocument(receiptImage, receiptStoragePath);
+                              } else {
+                                setPreviewReceipt(receiptImage);
+                                setPreviewStoragePath(receiptStoragePath);
+                              }
                             }}
                           >
-                            {isPdfReceipt(receiptImage) || receiptFileName?.toLowerCase().includes('.pdf') ? (
+                            {isPdfReceipt(receiptImage, receiptStoragePath) || receiptFileName?.toLowerCase().includes('.pdf') ? (
                               <div className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-950/30 flex items-center justify-center border border-red-100/50 dark:border-red-900/20 text-red-500 shrink-0 group-hover/preview:scale-110 transition-transform">
                                 <FileText className="w-5 h-5" />
                               </div>
@@ -2658,7 +2735,7 @@ export default function TripDetail() {
                 <div className="mb-8">
                   <h2 className="text-2xl font-black dark:text-white flex items-center gap-4">
                     <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-500 shadow-inner">
-                      {isPdfReceipt(previewReceipt) ? (
+                      {isPdfReceipt(previewReceipt, previewStoragePath) ? (
                         <FileText className="w-6 h-6" />
                       ) : (
                         <ImageIcon className="w-6 h-6" />
@@ -2678,7 +2755,7 @@ export default function TripDetail() {
                         <div className="w-12 h-12 border-4 border-orange-500/30 border-t-orange-500 rounded-full animate-spin mb-4" />
                         <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Refreshing Secure URL...</p>
                       </div>
-                    ) : isPdfReceipt(freshPreviewUrl || previewReceipt) ? (
+                    ) : isPdfReceipt(freshPreviewUrl || previewReceipt, previewStoragePath) ? (
                       <div className="flex flex-col items-center justify-center p-12 text-center w-full">
                         <div className="w-20 h-20 rounded-3xl bg-orange-500 text-white flex items-center justify-center shadow-2xl mb-6 transform -rotate-3 hover:rotate-0 transition-transform duration-500">
                           <FileText className="w-10 h-10" />
@@ -2696,6 +2773,14 @@ export default function TripDetail() {
                           <ExternalLink className="w-4 h-4 relative z-10" />
                         </button>
                       </div>
+                    ) : !isValidPreviewUrl(freshPreviewUrl || previewReceipt) ? (
+                      <div className="flex flex-col items-center justify-center p-8 text-center text-slate-400 w-full">
+                        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                          <ImageIcon className="w-8 h-8 text-slate-400" />
+                        </div>
+                        <p className="text-xs font-bold uppercase tracking-wider">No Preview Available</p>
+                        <p className="text-[10px] mt-2 max-w-[200px]">The receipt is not cached locally. Click "View Original" to open in a new browser tab.</p>
+                      </div>
                     ) : (
                       <div className="relative w-full h-full flex items-center justify-center">
                         <img 
@@ -2703,7 +2788,7 @@ export default function TripDetail() {
                           alt="Receipt" 
                           className="max-w-full h-auto object-contain rounded-2xl shadow-sm"
                           onError={(e) => {
-                            console.error("Image load failed");
+                            console.warn("Receipt image load failed");
                             const parent = e.currentTarget.parentElement;
                             if (parent) {
                               const errorDiv = document.createElement('div');

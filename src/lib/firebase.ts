@@ -8,6 +8,14 @@ const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const storage = getStorage(app);
 
+// Limit Storage retry times to prevent long hanging retry-limit-exceeded operations when storage bucket is unprovisioned
+try {
+  storage.maxOperationRetryTime = 3000;
+  storage.maxUploadRetryTime = 3000;
+} catch (e) {
+  console.warn("Could not set Storage retry limits:", e);
+}
+
 // Silence Firestore warning logs (such as transient clock skew warning logs pointing to update times in the future)
 setLogLevel('error');
 
