@@ -10,18 +10,20 @@ import Footer from './components/Footer';
 import MobileNav from './components/MobileNav';
 import AuthScreen from './components/AuthScreen';
 import Dashboard from './components/Dashboard';
-import TripDetail from './components/TripDetail';
 import RouteProgressBar from './components/RouteProgressBar';
-import PrivacyPolicy from './components/pages/PrivacyPolicy';
-import About from './components/pages/About';
-import Contact from './components/pages/Contact';
-import TermsOfService from './components/pages/TermsOfService';
-import HelpCenter from './components/pages/HelpCenter';
 import { AnimatePresence, motion } from 'motion/react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
+
+
+const TripDetail = lazy(() => import('./components/TripDetail'));
+const PrivacyPolicy = lazy(() => import('./components/pages/PrivacyPolicy'));
+const About = lazy(() => import('./components/pages/About'));
+const Contact = lazy(() => import('./components/pages/Contact'));
+const TermsOfService = lazy(() => import('./components/pages/TermsOfService'));
+const HelpCenter = lazy(() => import('./components/pages/HelpCenter'));
 
 function AppContent() {
   const { user, loading: authLoading } = useAuth();
@@ -125,16 +127,22 @@ function AppContent() {
       <Header theme={theme} setTheme={setTheme} />
       
       <main className="animate-fade-in relative z-10 flex-grow pb-24 md:pb-0">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/trip/:tripId" element={<TripDetail />} />
-          <Route path="/privacy" element={<PrivacyPolicy />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/contact" element={<Contact />} />
-          <Route path="/terms" element={<TermsOfService />} />
-          <Route path="/help" element={<HelpCenter />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={
+          <div className="max-w-7xl mx-auto px-4 md:px-6 pt-20 md:pt-24 min-h-screen flex items-center justify-center">
+            <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        }>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/trip/:tripId" element={<TripDetail />} />
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/contact" element={<Contact />} />
+            <Route path="/terms" element={<TermsOfService />} />
+            <Route path="/help" element={<HelpCenter />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
 
       <Footer />

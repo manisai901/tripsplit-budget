@@ -813,6 +813,15 @@ export default function TripDetail() {
       }
     }
 
+    // Try to pre-resolve direct cloud URL if only path is set or we have placeholders
+    if (finalStoragePath && (!finalReceiptUrl || finalReceiptUrl.startsWith('local_receipt_ref_') || finalReceiptUrl === 'pdf_placeholder')) {
+      try {
+        finalReceiptUrl = await getDownloadURL(ref(storage, finalStoragePath));
+      } catch (err) {
+        console.warn("Could not get final receipt URL pre-save:", err);
+      }
+    }
+
     if (finalReceiptUrl && finalReceiptUrl.startsWith('local_receipt_ref_')) {
       finalReceiptUrl = null;
     }
@@ -1705,10 +1714,10 @@ export default function TripDetail() {
                         <div className="min-w-0 flex-1">
                           <h5 className="text-sm md:text-base font-bold text-slate-800 dark:text-white flex flex-wrap items-center gap-2 leading-tight break-words">
                             {expense.description}
-                             {expense.receiptUrl && (
+                             {(expense.receiptUrl || expense.receiptStoragePath) && (
                             <button 
                               onClick={() => {
-                                setPreviewReceipt(expense.receiptUrl!);
+                                setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
                                 setPreviewStoragePath(expense.receiptStoragePath);
                               }}
                               className="text-slate-400 hover:text-orange-500 transition-colors"
@@ -1751,10 +1760,10 @@ export default function TripDetail() {
                               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> Shared with {expense.participants?.length || activeTrip?.members?.length || 0}
                             </span>
                           )}
-                          {expense.receiptUrl && (
+                          {(expense.receiptUrl || expense.receiptStoragePath) && (
                             <button 
                               onClick={() => {
-                                setPreviewReceipt(expense.receiptUrl!);
+                                setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
                                 setPreviewStoragePath(expense.receiptStoragePath);
                               }}
                               className="px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-emerald-100 dark:border-emerald-900/10"
