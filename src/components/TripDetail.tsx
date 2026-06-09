@@ -213,6 +213,27 @@ export default function TripDetail() {
   const [receiptStoragePath, setReceiptStoragePath] = useState<string | null>(null);
   const [previewReceipt, setPreviewReceipt] = useState<string | null>(null);
   const [previewStoragePath, setPreviewStoragePath] = useState<string | null>(null);
+  const [freshPreviewUrl, setFreshPreviewUrl] = useState<string | null>(null);
+
+  // Sync fresh URL for preview modal
+  useEffect(() => {
+    if (!previewReceipt && !previewStoragePath) {
+      setFreshPreviewUrl(null);
+      return;
+    }
+
+    if (previewStoragePath) {
+      const fileRef = ref(storage, previewStoragePath);
+      getDownloadURL(fileRef)
+        .then(url => setFreshPreviewUrl(url))
+        .catch(err => {
+          console.error("Failed to refresh preview URL:", err);
+          setFreshPreviewUrl(previewReceipt); // Fallback
+        });
+    } else {
+      setFreshPreviewUrl(previewReceipt);
+    }
+  }, [previewReceipt, previewStoragePath]);
 
   // Unified modal close handler that correctly pops history
   const closeModal = () => {
@@ -318,66 +339,65 @@ export default function TripDetail() {
   };
 
   const handleOpenDocument = async (url: string | null, storagePath?: string | null) => {
-    if (!url && !storagePath) return;
+    const targetUrl = url || freshPreviewUrl;
+    if (!targetUrl && !storagePath) return;
     
-    // Open the window IMMEDIATELY to bypass popup blockers.
-    // We then update its location once we have the URL.
-    const newWin = window.open('about:blank', '_blank');
+    // If we have a valid cloud URL, open it IMMEDIATELY
+    if (targetUrl && (targetUrl.startsWith('http') || targetUrl.startsWith('https')) && !targetUrl.startsWith('local_receipt_ref_')) {
+      const newWin = window.open(targetUrl, '_blank');
+      if (!newWin) {
+        toast.error("Popup blocked! Please allow popups to view documents.");
+      }
+      return;
+    }
+
+    // Fallback for storagePath or local references
+    const newWin = window.open('', '_blank');
     if (!newWin) {
       toast.error("Popup blocked! Please allow popups for this site.");
       return;
     }
 
-    let realUrl = url;
+    // Provide a simple bridge for local/fetched docs
+    newWin.document.write(`
+      <html>
+        <head>
+          <title>Opening Document...</title>
+          <style>
+            body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc; color: #64748b; }
+            .loader { border: 3px solid #f3f3f3; border-top: 3px solid #f97316; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin-bottom: 15px; }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            .container { text-align: center; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="loader"></div>
+            <div>Securely fetching your document...</div>
+          </div>
+        </body>
+      </html>
+    `);
+
+    let realUrl = targetUrl;
     
-    if (storagePath) {
+    if (storagePath && !realUrl) {
       try {
         const fileRef = ref(storage, storagePath);
         realUrl = await getDownloadURL(fileRef);
       } catch (err) {
         console.error("Failed to get fresh download URL:", err);
-        // If we fail to get URL, we'll try the provided url if it exists
       }
     }
 
     if (!realUrl) {
       newWin.close();
-      toast.error("Document link expired or missing.");
+      toast.error("Document not yet synced or link expired.");
       return;
     }
     
     const realData = getReceiptData(realUrl);
-
-    if (realData.startsWith('data:')) {
-      try {
-        const base64Parts = realData.split(';base64,');
-        let actualBase64 = realData;
-        let mimeType = isPdfReceipt(realUrl) ? 'application/pdf' : 'image/jpeg';
-        
-        if (base64Parts.length === 2) {
-          mimeType = base64Parts[0].replace('data:', '');
-          actualBase64 = base64Parts[1];
-        }
-
-        const byteCharacters = atob(actualBase64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: mimeType });
-        const fileURL = URL.createObjectURL(blob);
-        newWin.location.href = fileURL;
-      } catch (err) {
-        console.error("Failed to open data URL in new tab:", err);
-        newWin.close();
-        toast.error("Could not open local document.");
-      }
-    } else {
-      // For cloud URLs, append timestamp to bypass cache
-      const separator = realData.includes('?') ? '&' : '?';
-      newWin.location.href = `${realData}${separator}t=${Date.now()}`;
-    }
+    newWin.location.replace(realData);
   };
 
   // PDF Document and camera upload states and refs
@@ -578,8 +598,10 @@ export default function TripDetail() {
             resolve(file);
           }
         };
+        img.onerror = () => resolve(file);
         img.src = event.target?.result as string;
       };
+      reader.onerror = () => resolve(file);
       reader.readAsDataURL(file);
     });
   };
@@ -608,18 +630,45 @@ export default function TripDetail() {
       reader.readAsDataURL(file);
     }
 
-    // 3. Background upload - completely non-blocking
+    // 3. Background upload - completely non-blocking but tracks status
+    setIsUploadingFile(true);
     (async () => {
       try {
         const uploadFile = isPdf ? file : await compressImage(file);
         const fileRef = ref(storage, storagePath);
-        await uploadBytes(fileRef, uploadFile, { 
+        
+        // Using resumable for better reliability
+        const uploadTask = uploadBytesResumable(fileRef, uploadFile, { 
           contentType: isPdf ? 'application/pdf' : 'image/jpeg' 
         });
-        const url = await getDownloadURL(fileRef);
-        setReceiptImage(url); 
+
+        // Create a wrapper promise so we can track it if needed
+        pendingUploadRef.current = new Promise((resolve, reject) => {
+          uploadTask.on('state_changed', 
+            null,
+            (error) => {
+              console.error("Storage upload task failed:", error);
+              reject(error);
+            },
+            async () => {
+              try {
+                const url = await getDownloadURL(fileRef);
+                setReceiptImage(url);
+                resolve({ url, path: storagePath });
+              } catch (err) {
+                reject(err);
+              }
+            }
+          );
+        });
+
+        await pendingUploadRef.current;
       } catch (err) {
         console.error("Background upload failed:", err);
+        toast.error("Cloud document sync failed. Using local copy for now.");
+      } finally {
+        setIsUploadingFile(false);
+        pendingUploadRef.current = null;
       }
     })();
   };
@@ -698,6 +747,18 @@ export default function TripDetail() {
     
     let finalReceiptUrl = receiptImage;
     const finalStoragePath = receiptStoragePath;
+
+    if (pendingUploadRef.current) {
+      const waitToast = toast.loading("Finalizing cloud sync...");
+      try {
+        const result = await pendingUploadRef.current;
+        finalReceiptUrl = result.url;
+        toast.dismiss(waitToast);
+      } catch (err) {
+        console.error("Pending upload wait failed:", err);
+        toast.dismiss(waitToast);
+      }
+    }
 
     if (finalReceiptUrl && finalReceiptUrl.startsWith('local_receipt_ref_')) {
       finalReceiptUrl = null;
@@ -2517,56 +2578,80 @@ export default function TripDetail() {
 
       <AnimatePresence>
         {previewReceipt && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-md scroll-smooth transition-all overflow-hidden">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 w-full max-w-lg shadow-2xl relative max-h-[90vh] overflow-y-auto scrollbar-hide"
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-6 sm:p-10 w-full max-w-2xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] relative max-h-[90vh] overflow-y-auto scrollbar-hide flex flex-col"
             >
               <button 
                 onClick={() => setPreviewReceipt(null)}
-                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-full transition-colors"
+                className="absolute top-6 right-6 p-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-full transition-all active:scale-90 hover:rotate-90"
               >
-                <X className="w-5 h-5" />
+                <X className="w-6 h-6" />
               </button>
-              <h2 className="text-xl font-black mb-6 dark:text-white flex items-center gap-3">
-                {isPdfReceipt(previewReceipt) ? (
-                  <FileText className="w-6 h-6 text-orange-500" />
-                ) : (
-                  <ImageIcon className="w-6 h-6 text-orange-500" />
-                )}
-                Receipt
-              </h2>
-              <div className="flex flex-col gap-4 w-full">
-                <div className="flex justify-center w-full max-h-[50vh] min-h-[300px] overflow-auto rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/20">
-                  {isPdfReceipt(previewReceipt) ? (
-                    <div className="flex flex-col items-center justify-center p-8 text-center w-full">
-                      <div className="w-16 h-16 rounded-2xl bg-orange-500/10 flex items-center justify-center text-orange-500 mb-4 shadow-sm">
-                        <FileText className="w-8 h-8" />
-                      </div>
-                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-2">Secure PDF Receipt Document</p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 max-w-xs leading-relaxed">
-                        Modern secure browsers prevent loading PDF files inside of nested sandbox frames. Open the document directly below to view it safely in a fresh window.
-                      </p>
-                      <button 
-                        onClick={() => handleOpenDocument(previewReceipt, previewStoragePath)}
-                        className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md inline-flex items-center gap-2 active:scale-95 cursor-pointer"
-                      >
-                        Open PDF in New Tab <ExternalLink className="w-4 h-4" />
-                      </button>
+              
+              <div className="flex flex-col h-full">
+                <div className="mb-8">
+                  <h2 className="text-2xl font-black dark:text-white flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-500 shadow-inner">
+                      {isPdfReceipt(previewReceipt) ? (
+                        <FileText className="w-6 h-6" />
+                      ) : (
+                        <ImageIcon className="w-6 h-6" />
+                      )}
                     </div>
-                  ) : (
-                    <img src={getReceiptData(previewReceipt)} alt="Receipt" className="max-w-full h-auto object-contain rounded-xl" />
-                  )}
+                    <div>
+                      <p className="text-[10px] text-orange-500 font-black uppercase tracking-[0.2em] mb-1">Document Evidence</p>
+                      Receipt Details
+                    </div>
+                  </h2>
                 </div>
-                <div className="flex justify-end">
-                  <button 
-                    onClick={() => handleOpenDocument(previewReceipt, previewStoragePath)}
-                    className="text-xs font-bold text-orange-500 hover:text-orange-600 transition-colors flex items-center gap-1.5 cursor-pointer"
-                  >
-                    Open in New Tab <ExternalLink className="w-3.5 h-3.5" />
-                  </button>
+
+                <div className="flex flex-col gap-6 flex-1 min-h-0">
+                  <div className="flex-1 flex justify-center w-full min-h-[350px] overflow-auto rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-2">
+                    {isPdfReceipt(previewReceipt) ? (
+                      <div className="flex flex-col items-center justify-center p-12 text-center w-full">
+                        <div className="w-20 h-20 rounded-3xl bg-orange-500 text-white flex items-center justify-center shadow-2xl mb-6 transform -rotate-3 hover:rotate-0 transition-transform duration-500">
+                          <FileText className="w-10 h-10" />
+                        </div>
+                        <h3 className="text-lg font-black text-slate-800 dark:text-white mb-3">Native PDF Document</h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-8 max-w-sm leading-relaxed font-medium">
+                          Secure PDF rendering is optimized for your browser's native viewer. Open the document directly for the smoothest experience.
+                        </p>
+                        <button 
+                          onClick={() => handleOpenDocument(freshPreviewUrl || previewReceipt, previewStoragePath)}
+                          className="group relative px-8 py-4 bg-orange-500 hover:bg-orange-600 text-white text-xs font-black uppercase tracking-widest rounded-2xl transition-all shadow-xl shadow-orange-500/30 inline-flex items-center gap-3 active:scale-95 cursor-pointer overflow-hidden"
+                        >
+                          <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                          <span className="relative z-10">Open PDF in New Tab</span>
+                          <ExternalLink className="w-4 h-4 relative z-10" />
+                        </button>
+                      </div>
+                    ) : (
+                      <img 
+                        src={getReceiptData(freshPreviewUrl || previewReceipt)} 
+                        alt="Receipt" 
+                        className="max-w-full h-auto object-contain rounded-2xl shadow-sm"
+                        onError={(e) => {
+                          console.error("Image load failed");
+                        }}
+                      />
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800 mt-auto">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                      Verified by Trip Security
+                    </p>
+                    <button 
+                      onClick={() => handleOpenDocument(freshPreviewUrl || previewReceipt, previewStoragePath)}
+                      className="group text-[10px] font-black text-orange-500 hover:text-orange-600 transition-all flex items-center gap-2 cursor-pointer py-2 px-4 rounded-xl hover:bg-orange-50 dark:hover:bg-orange-950/20"
+                    >
+                      View Original <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </motion.div>

@@ -150,7 +150,7 @@ service cloud.firestore {
                         isValidExpense(incoming()) &&
                         incoming().payerId == existing().payerId &&
                         incoming().createdAt == existing().createdAt &&
-                        incoming().diff(existing()).affectedKeys().hasOnly(['amount', 'description', 'category', 'date', 'participants', 'splitType']);
+                        incoming().diff(existing()).affectedKeys().hasOnly(['amount', 'description', 'category', 'date', 'participants', 'splitType', 'receiptUrl', 'receiptStoragePath']);
         allow delete: if canTripMemberEdit(tripId) && (existing().payerId == request.auth.uid || isTripOwner(tripId));
       }
 
