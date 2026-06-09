@@ -12,7 +12,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { db, storage } from '../lib/firebase';
-import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, uploadBytesResumable, getBytes } from 'firebase/storage';
 import { UserAvatar } from './Avatar';
 import QRCode from 'qrcode';
 
@@ -216,6 +216,7 @@ export default function TripDetail() {
   const [freshPreviewUrl, setFreshPreviewUrl] = useState<string | null>(null);
   const [isPreviewRefreshing, setIsPreviewRefreshing] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
 
   // Sync fresh URL for preview modal
   useEffect(() => {
@@ -262,20 +263,28 @@ export default function TripDetail() {
     const targetUrl = freshPreviewUrl || previewReceipt;
     if (!targetUrl) {
       setPdfBlobUrl(null);
+      setIsPdfLoading(false);
       return;
     }
 
     const isPdf = isPdfReceipt(targetUrl, previewStoragePath);
     if (!isPdf) {
       setPdfBlobUrl(null);
+      setIsPdfLoading(false);
       return;
     }
 
     const resolved = getReceiptData(targetUrl);
     if (!resolved) {
       setPdfBlobUrl(null);
+      setIsPdfLoading(false);
       return;
     }
+
+    let active = true;
+    let bUrl: string | null = null;
+
+    setIsPdfLoading(true);
 
     if (resolved.startsWith('data:')) {
       try {
@@ -289,18 +298,72 @@ export default function TripDetail() {
           bytes[i] = bin.charCodeAt(i);
         }
         const blob = new Blob([bytes], { type: mime });
-        const bUrl = URL.createObjectURL(blob);
-        setPdfBlobUrl(bUrl);
-        return () => {
-          URL.revokeObjectURL(bUrl);
-        };
+        bUrl = URL.createObjectURL(blob);
+        if (active) {
+          setPdfBlobUrl(bUrl);
+          setIsPdfLoading(false);
+        }
       } catch (err) {
         console.error("PDF data url blob conversion failed:", err);
-        setPdfBlobUrl(resolved);
+        if (active) {
+          setPdfBlobUrl(resolved);
+          setIsPdfLoading(false);
+        }
       }
+    } else if (previewStoragePath) {
+      // It's a cloud storage PDF! Fetch bytes via SDK to bypass iframe CORS/CSP and prevent login page redirect.
+      getBytes(ref(storage, previewStoragePath))
+        .then((arrayBuffer) => {
+          if (!active) return;
+          const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+          bUrl = URL.createObjectURL(blob);
+          setPdfBlobUrl(bUrl);
+          setIsPdfLoading(false);
+        })
+        .catch((err) => {
+          console.error("Failed to fetch PDF bytes using Storage SDK, trying fallback:", err);
+          // Fallback to fetch
+          fetch(resolved)
+            .then(res => res.blob())
+            .then(blob => {
+              if (!active) return;
+              bUrl = URL.createObjectURL(blob);
+              setPdfBlobUrl(bUrl);
+              setIsPdfLoading(false);
+            })
+            .catch((innerErr) => {
+              console.error("Fallback fetch also failed:", innerErr);
+              if (active) {
+                setPdfBlobUrl(resolved);
+                setIsPdfLoading(false);
+              }
+            });
+        });
     } else {
-      setPdfBlobUrl(resolved);
+      // Remote URL with no storage path
+      fetch(resolved)
+        .then(res => res.blob())
+        .then(blob => {
+          if (!active) return;
+          bUrl = URL.createObjectURL(blob);
+          setPdfBlobUrl(bUrl);
+          setIsPdfLoading(false);
+        })
+        .catch((err) => {
+          console.error("Fetch remote URL failed:", err);
+          if (active) {
+            setPdfBlobUrl(resolved);
+            setIsPdfLoading(false);
+          }
+        });
     }
+
+    return () => {
+      active = false;
+      if (bUrl) {
+        URL.revokeObjectURL(bUrl);
+      }
+    };
   }, [freshPreviewUrl, previewReceipt, previewStoragePath]);
 
   // Unified modal close handler that correctly pops history
@@ -517,24 +580,54 @@ export default function TripDetail() {
     const realData = getReceiptData(realUrl);
     const finalIsPdf = isPdfReceipt(realUrl, storagePath);
 
-    if (finalIsPdf && realData.startsWith('data:')) {
-      try {
-        const parts = realData.split(',');
-        const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/pdf';
-        const b64 = parts[1];
-        
-        const bin = atob(b64);
-        const len = bin.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = bin.charCodeAt(i);
+    if (finalIsPdf) {
+      if (realData.startsWith('data:')) {
+        try {
+          const parts = realData.split(',');
+          const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/pdf';
+          const b64 = parts[1];
+          
+          const bin = atob(b64);
+          const len = bin.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = bin.charCodeAt(i);
+          }
+          const blob = new Blob([bytes], { type: mime });
+          const blobUrl = URL.createObjectURL(blob);
+          newWin.location.replace(blobUrl);
+        } catch (err) {
+          console.error("PDF Blob conversion failed", err);
+          newWin.location.replace(realData);
         }
-        const blob = new Blob([bytes], { type: mime });
-        const blobUrl = URL.createObjectURL(blob);
-        newWin.location.replace(blobUrl);
-      } catch (err) {
-        console.error("PDF Blob conversion failed", err);
-        newWin.location.replace(realData);
+      } else if (storagePath) {
+        try {
+          const arrayBuffer = await getBytes(ref(storage, storagePath));
+          const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+          const blobUrl = URL.createObjectURL(blob);
+          newWin.location.replace(blobUrl);
+        } catch (err) {
+          console.error("Failed to fetch PDF bytes using Storage SDK for popup:", err);
+          try {
+            const res = await fetch(realData);
+            const blob = await res.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            newWin.location.replace(blobUrl);
+          } catch (innerErr) {
+            console.error("Fallback fetch also failed, falling back to direct URL:", innerErr);
+            newWin.location.replace(realData);
+          }
+        }
+      } else {
+        try {
+          const res = await fetch(realData);
+          const blob = await res.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          newWin.location.replace(blobUrl);
+        } catch (err) {
+          console.error("Fetch of remote URL failed for popup, falling back to direct URL:", err);
+          newWin.location.replace(realData);
+        }
       }
     } else {
       newWin.location.replace(realData);
@@ -2792,6 +2885,12 @@ export default function TripDetail() {
                       </div>
                     ) : isPdfReceipt(freshPreviewUrl || previewReceipt, previewStoragePath) ? (
                       <div className="w-full h-full flex flex-col relative min-h-[450px]">
+                        {isPdfLoading && !pdfBlobUrl && (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-slate-900 z-20 rounded-2xl">
+                            <div className="w-12 h-12 border-4 border-rose-500/30 border-t-rose-500 rounded-full animate-spin mb-4" />
+                            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Decrypting & Streaming PDF...</p>
+                          </div>
+                        )}
                         <iframe 
                           src={pdfBlobUrl || getReceiptData(freshPreviewUrl || previewReceipt) || undefined} 
                           className="w-full h-full flex-1 rounded-2xl border-0 overflow-hidden shadow-inner bg-white dark:bg-slate-900"
