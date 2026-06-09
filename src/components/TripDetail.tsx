@@ -2346,8 +2346,8 @@ export default function TripDetail() {
                                 <FileText className="w-5 h-5" />
                               </div>
                             ) : (
-                              <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-750 bg-black group-hover/preview:scale-110 transition-transform">
-                                <img src={getReceiptData(receiptImage)} alt="Receipt preview" className="w-full h-full object-cover" />
+                              <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-755 bg-black group-hover/preview:scale-110 transition-transform">
+                                <img src={getReceiptData(receiptImage) || undefined} alt="Receipt preview" className="w-full h-full object-cover" />
                               </div>
                             )}
                             <span className="text-xs font-bold truncate pr-3 max-w-[180px] dark:text-white group-hover/preview:text-orange-500 transition-colors">
@@ -2793,7 +2793,7 @@ export default function TripDetail() {
                     ) : isPdfReceipt(freshPreviewUrl || previewReceipt, previewStoragePath) ? (
                       <div className="w-full h-full flex flex-col relative min-h-[450px]">
                         <iframe 
-                          src={pdfBlobUrl || getReceiptData(freshPreviewUrl || previewReceipt)} 
+                          src={pdfBlobUrl || getReceiptData(freshPreviewUrl || previewReceipt) || undefined} 
                           className="w-full h-full flex-1 rounded-2xl border-0 overflow-hidden shadow-inner bg-white dark:bg-slate-900"
                           title="PDF Receipt Viewer"
                           style={{ width: '100%', height: '100%' }}
@@ -2820,7 +2820,7 @@ export default function TripDetail() {
                     ) : (
                       <div className="relative w-full h-full flex items-center justify-center">
                         <img 
-                          src={getReceiptData(freshPreviewUrl || previewReceipt)} 
+                          src={getReceiptData(freshPreviewUrl || previewReceipt) || undefined} 
                           alt="Receipt" 
                           className="max-w-full h-auto object-contain rounded-2xl shadow-sm"
                           onError={(e) => {
