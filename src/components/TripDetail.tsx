@@ -357,8 +357,13 @@ export default function TripDetail() {
     const targetUrl = url || freshPreviewUrl;
     if (!targetUrl && !storagePath) return;
     
-    // If we have a valid cloud URL, open it IMMEDIATELY
-    if (targetUrl && (targetUrl.startsWith('http') || targetUrl.startsWith('https')) && !targetUrl.startsWith('local_receipt_ref_')) {
+    // Check if it's a PDF
+    const isPdf = isPdfReceipt(targetUrl);
+    
+    // If we have a direct public cloud URL and it's NOT a PDF, open immediately.
+    // (PDFs are better handled via blob conversion for consistent mobile/desktop behavior)
+    if (targetUrl && (targetUrl.startsWith('http') || targetUrl.startsWith('https')) && 
+        !targetUrl.startsWith('local_receipt_ref_') && !isPdf) {
       const newWin = window.open(targetUrl, '_blank');
       if (!newWin) {
         toast.error("Popup blocked! Please allow popups to view documents.");
@@ -366,37 +371,46 @@ export default function TripDetail() {
       return;
     }
 
-    // Fallback for storagePath or local references
+    // Opens a window immediately to bypass popup blockers for all other cases
     const newWin = window.open('', '_blank');
     if (!newWin) {
       toast.error("Popup blocked! Please allow popups for this site.");
       return;
     }
 
-    // Provide a simple bridge for local/fetched docs
+    // Professional loading screen inside the new tab
     newWin.document.write(`
       <html>
         <head>
-          <title>Opening Document...</title>
+          <title>Mani Traveler - Viewing Receipt</title>
           <style>
-            body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc; color: #64748b; }
-            .loader { border: 3px solid #f3f3f3; border-top: 3px solid #f97316; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; margin-bottom: 15px; }
+            body { 
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+              display: flex; flex-direction: column; align-items: center; justify-content: center; 
+              height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; 
+            }
+            .loader { 
+              border: 3px solid rgba(249, 115, 22, 0.1); border-top: 3px solid #f97316; 
+              border-radius: 50%; width: 32px; height: 32px; animation: spin 0.8s ease-in-out infinite; 
+              margin-bottom: 24px; 
+            }
             @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            .container { text-align: center; }
+            .brand { font-size: 11px; font-weight: 900; letter-spacing: 0.25em; color: #f97316; margin-bottom: 8px; text-transform: uppercase; }
+            .msg { font-size: 15px; font-weight: 400; opacity: 0.8; }
           </style>
         </head>
         <body>
-          <div class="container">
-            <div class="loader"></div>
-            <div>Securely fetching your document...</div>
-          </div>
+          <div class="loader"></div>
+          <div class="brand">Mani Traveler Security</div>
+          <div class="msg">Decrypting and streaming your receipt document...</div>
         </body>
       </html>
     `);
 
     let realUrl = targetUrl;
     
-    if (storagePath && !realUrl) {
+    // Fetch if missing or only local ref
+    if (storagePath && (!realUrl || realUrl.startsWith('local_receipt_ref_'))) {
       try {
         const fileRef = ref(storage, storagePath);
         realUrl = await getDownloadURL(fileRef);
@@ -406,13 +420,37 @@ export default function TripDetail() {
     }
 
     if (!realUrl) {
-      newWin.close();
-      toast.error("Document not yet synced or link expired.");
+      newWin.document.body.innerHTML = '<div style="color:#ef4444; font-family:sans-serif; text-align:center; padding:20px;">Receipt not found. Link may have expired.</div>';
+      setTimeout(() => newWin.close(), 3000);
+      toast.error("Document link expired.");
       return;
     }
     
     const realData = getReceiptData(realUrl);
-    newWin.location.replace(realData);
+    const finalIsPdf = isPdfReceipt(realUrl);
+
+    if (finalIsPdf && realData.startsWith('data:')) {
+      try {
+        const parts = realData.split(',');
+        const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/pdf';
+        const b64 = parts[1];
+        
+        const bin = atob(b64);
+        const len = bin.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = bin.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: mime });
+        const blobUrl = URL.createObjectURL(blob);
+        newWin.location.replace(blobUrl);
+      } catch (err) {
+        console.error("PDF Blob conversion failed", err);
+        newWin.location.replace(realData);
+      }
+    } else {
+      newWin.location.replace(realData);
+    }
   };
 
   // PDF Document and camera upload states and refs
