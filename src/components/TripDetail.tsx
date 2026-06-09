@@ -1,6 +1,6 @@
 import { 
   ArrowLeft, Plus, DollarSign, PieChart as PieChartIcon, Users, Receipt, 
-  Trash2, TrendingUp, ChevronRight, ArrowRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download, QrCode, Globe, Mic, MicOff, Camera, FileText, Loader2, ExternalLink
+  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download, QrCode, Globe, Mic, MicOff, Camera, FileText, Loader2, ExternalLink
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useTrip } from '../context/TripContext';
@@ -8,21 +8,20 @@ import { formatDate, formatCurrency, cn, formatDateTime, formatTime } from '../l
 import { motion, AnimatePresence } from 'motion/react';
 import { useState, useMemo, FormEvent, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
+import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 import { doc, getDocFromServer } from 'firebase/firestore';
 import { db, storage } from '../lib/firebase';
-import { ref, uploadBytes, getDownloadURL, uploadBytesResumable, getBytes } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { UserAvatar } from './Avatar';
 import QRCode from 'qrcode';
 
 export default function TripDetail() {
   const { user } = useAuth();
-  const { trips, activeTrip, expenses, checklist, members, addExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, withdrawJoinRequest, updateChecklistItem, updateTripSettings, setActiveTripId, joinTrip, loading, deleteTrip } = useTrip();
+  const { trips, activeTrip, expenses, checklist, members, addExpense, updateExpense, addChecklistItem, toggleChecklistItem, removeMember, approveMember, withdrawJoinRequest, updateChecklistItem, updateTripSettings, setActiveTripId, joinTrip, loading, deleteTrip } = useTrip();
   const { tripId } = useParams();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const modalParam = searchParams.get('modal');
 
   const approvedMembers = useMemo(() => members.filter(m => m.role !== 'pending'), [members]);
   const pendingMembers = useMemo(() => members.filter(m => m.role === 'pending'), [members]);
@@ -213,216 +212,6 @@ export default function TripDetail() {
   const [receiptStoragePath, setReceiptStoragePath] = useState<string | null>(null);
   const [previewReceipt, setPreviewReceipt] = useState<string | null>(null);
   const [previewStoragePath, setPreviewStoragePath] = useState<string | null>(null);
-  const [freshPreviewUrl, setFreshPreviewUrl] = useState<string | null>(null);
-  const [isPreviewRefreshing, setIsPreviewRefreshing] = useState(false);
-  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
-  const [isPdfLoading, setIsPdfLoading] = useState(false);
-
-  // Sync fresh URL for preview modal
-  useEffect(() => {
-    if (!previewReceipt && !previewStoragePath) {
-      setFreshPreviewUrl(null);
-      setIsPreviewRefreshing(false);
-      return;
-    }
-
-    if (previewStoragePath) {
-      const isLocalRef = previewReceipt && previewReceipt.startsWith('local_receipt_ref_');
-      const hasLocalCopy = isLocalRef && !!localStorage.getItem(previewReceipt);
-      
-      if (hasLocalCopy) {
-        setFreshPreviewUrl(previewReceipt);
-        setIsPreviewRefreshing(false);
-        return;
-      }
-
-      setIsPreviewRefreshing(true);
-      const fileRef = ref(storage, previewStoragePath);
-      getDownloadURL(fileRef)
-        .then(url => {
-          setFreshPreviewUrl(url);
-          setIsPreviewRefreshing(false);
-        })
-        .catch(err => {
-          if (err && (err.code === 'storage/retry-limit-exceeded' || String(err).includes('retry-limit-exceeded'))) {
-            console.warn("Storage is offline or unprovisioned. Using local fallback for receipt preview.");
-          } else {
-            console.warn("Could not refresh preview URL:", err);
-          }
-          setFreshPreviewUrl(previewReceipt); // Fallback
-          setIsPreviewRefreshing(false);
-        });
-    } else {
-      setFreshPreviewUrl(previewReceipt);
-      setIsPreviewRefreshing(false);
-    }
-  }, [previewReceipt, previewStoragePath]);
-
-  // Convert/cache PDF Data as Local Blob URI for highly compatible inline view within iframes
-  useEffect(() => {
-    const targetUrl = freshPreviewUrl || previewReceipt;
-    if (!targetUrl) {
-      setPdfBlobUrl(null);
-      setIsPdfLoading(false);
-      return;
-    }
-
-    const isPdf = isPdfReceipt(targetUrl, previewStoragePath);
-    if (!isPdf) {
-      setPdfBlobUrl(null);
-      setIsPdfLoading(false);
-      return;
-    }
-
-    const resolved = getReceiptData(targetUrl);
-    if (!resolved) {
-      setPdfBlobUrl(null);
-      setIsPdfLoading(false);
-      return;
-    }
-
-    let active = true;
-    let bUrl: string | null = null;
-
-    setIsPdfLoading(true);
-
-    if (resolved.startsWith('data:')) {
-      try {
-        const parts = resolved.split(',');
-        const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/pdf';
-        const b64 = parts[1];
-        const bin = atob(b64);
-        const len = bin.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) {
-          bytes[i] = bin.charCodeAt(i);
-        }
-        const blob = new Blob([bytes], { type: mime });
-        bUrl = URL.createObjectURL(blob);
-        if (active) {
-          setPdfBlobUrl(bUrl);
-          setIsPdfLoading(false);
-        }
-      } catch (err) {
-        console.error("PDF data url blob conversion failed:", err);
-        if (active) {
-          setPdfBlobUrl(resolved);
-          setIsPdfLoading(false);
-        }
-      }
-    } else if (previewStoragePath) {
-      // It's a cloud storage PDF! Fetch bytes via SDK to bypass iframe CORS/CSP and prevent login page redirect.
-      getBytes(ref(storage, previewStoragePath))
-        .then((arrayBuffer) => {
-          if (!active) return;
-          const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-          bUrl = URL.createObjectURL(blob);
-          setPdfBlobUrl(bUrl);
-          setIsPdfLoading(false);
-        })
-        .catch((err) => {
-          console.error("Failed to fetch PDF bytes using Storage SDK, trying fallback:", err);
-          // Fallback to fetch
-          fetch(resolved)
-            .then(res => res.blob())
-            .then(blob => {
-              if (!active) return;
-              bUrl = URL.createObjectURL(blob);
-              setPdfBlobUrl(bUrl);
-              setIsPdfLoading(false);
-            })
-            .catch((innerErr) => {
-              console.error("Fallback fetch also failed:", innerErr);
-              if (active) {
-                setPdfBlobUrl(resolved);
-                setIsPdfLoading(false);
-              }
-            });
-        });
-    } else {
-      // Remote URL with no storage path
-      fetch(resolved)
-        .then(res => res.blob())
-        .then(blob => {
-          if (!active) return;
-          bUrl = URL.createObjectURL(blob);
-          setPdfBlobUrl(bUrl);
-          setIsPdfLoading(false);
-        })
-        .catch((err) => {
-          console.error("Fetch remote URL failed:", err);
-          if (active) {
-            setPdfBlobUrl(resolved);
-            setIsPdfLoading(false);
-          }
-        });
-    }
-
-    return () => {
-      active = false;
-      if (bUrl) {
-        URL.revokeObjectURL(bUrl);
-      }
-    };
-  }, [freshPreviewUrl, previewReceipt, previewStoragePath]);
-
-  // Unified modal close handler that correctly pops history
-  const closeModal = () => {
-    if (searchParams.get('modal')) {
-      navigate(-1);
-    } else {
-      setIsAddingExpense(false);
-      setIsManagingAccess(false);
-      setIsShowingQRModal(false);
-      setPreviewReceipt(null);
-      setMemberToRemoveId(null);
-      setMemberToApprove(null);
-      setIsConfirmingWithdraw(false);
-    }
-  };
-
-  // Sync modal reactive states from URL (for back button support)
-  useEffect(() => {
-    const currentModal = searchParams.get('modal');
-    
-    if (!currentModal) {
-      setIsAddingExpense(false);
-      setIsManagingAccess(false);
-      setIsShowingQRModal(false);
-      setPreviewReceipt(null);
-      setMemberToRemoveId(null);
-      setMemberToApprove(null);
-      setIsConfirmingWithdraw(false);
-    } else {
-      if (currentModal === 'add') setIsAddingExpense(true);
-      if (currentModal === 'access') setIsManagingAccess(true);
-      if (currentModal === 'qr') setIsShowingQRModal(true);
-      if (currentModal === 'preview') {
-        // Only set previewReceipt if not already set (prevents clearing when hitting back from another sub-modal if any)
-      }
-    }
-  }, [searchParams]);
-
-  // Sync state changes to URL (push history)
-  useEffect(() => {
-    const currentModal = searchParams.get('modal');
-    
-    // Check if we need to push a new state
-    const targetModal = 
-      isAddingExpense ? 'add' :
-      isManagingAccess ? 'access' :
-      isShowingQRModal ? 'qr' :
-      previewReceipt ? 'preview' :
-      memberToRemoveId ? 'remove-member' :
-      memberToApprove ? 'approve-member' :
-      isConfirmingWithdraw ? 'withdraw' : null;
-
-    if (targetModal && currentModal !== targetModal) {
-      setSearchParams({ modal: targetModal }, { replace: false });
-    }
-  }, [isAddingExpense, isManagingAccess, isShowingQRModal, previewReceipt, memberToRemoveId, memberToApprove, isConfirmingWithdraw]);
-
-  const pendingUploadRef = useRef<Promise<{ url: string, path: string }> | null>(null);
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -458,179 +247,77 @@ export default function TripDetail() {
 
   const getReceiptData = (url: string | null): string => {
     if (!url) return '';
-    // Handle data URLs directly
-    if (url.startsWith('data:')) return url;
     if (url.startsWith('local_receipt_ref_')) {
       return localStorage.getItem(url) || '';
     }
     return url;
   };
 
-  const isValidPreviewUrl = (url: string | null | undefined): boolean => {
-    if (!url || url === 'fetching_preview') return false;
-    const resolved = getReceiptData(url);
-    if (!resolved) return false;
-    return resolved.startsWith('data:') || resolved.startsWith('http://') || resolved.startsWith('https://');
-  };
-
-  const isPdfReceipt = (url: string | null | undefined, storagePath?: string | null | undefined): boolean => {
-    if (!url && !storagePath) return false;
-    const targets: string[] = [];
-    if (url) {
-      targets.push(url.toLowerCase());
-      if (url.startsWith('local_receipt_ref_')) {
-        const localData = localStorage.getItem(url);
-        if (localData) {
-          targets.push(localData.toLowerCase());
-        }
-      }
-    }
-    if (storagePath) targets.push(storagePath.toLowerCase());
-    
-    return targets.some(target => 
-      target.includes('application/pdf') || 
-      target.includes('.pdf') || 
-      target.includes('_pdf') ||
-      target.includes('data:pdf') ||
-      target.startsWith('data:application/pdf') ||
-      target === 'pdf_placeholder'
-    );
+  const isPdfReceipt = (url: string | null): boolean => {
+    if (!url) return false;
+    return url.includes('_pdf') || url.includes('application/pdf') || url.toLowerCase().includes('.pdf');
   };
 
   const handleOpenDocument = async (url: string | null, storagePath?: string | null) => {
-    const targetUrl = url || freshPreviewUrl;
-    if (!targetUrl && !storagePath) return;
+    if (!url && !storagePath) return;
     
-    // Check if it's a PDF
-    const isPdf = isPdfReceipt(targetUrl, storagePath);
-    
-    // If we have a direct public cloud URL and it's NOT a PDF, open immediately.
-    // (PDFs are better handled via blob conversion for consistent mobile/desktop behavior)
-    if (targetUrl && (targetUrl.startsWith('http') || targetUrl.startsWith('https')) && 
-        !targetUrl.startsWith('local_receipt_ref_') && !isPdf) {
-      const newWin = window.open(targetUrl, '_blank');
-      if (!newWin) {
-        toast.error("Popup blocked! Please allow popups to view documents.");
-      }
-      return;
-    }
-
-    // Opens a window immediately to bypass popup blockers for all other cases
-    const newWin = window.open('', '_blank');
+    // Open the window IMMEDIATELY to bypass popup blockers.
+    // We then update its location once we have the URL.
+    const newWin = window.open('about:blank', '_blank');
     if (!newWin) {
       toast.error("Popup blocked! Please allow popups for this site.");
       return;
     }
 
-    // Professional loading screen inside the new tab
-    newWin.document.write(`
-      <html>
-        <head>
-          <title>Mani Traveler - Viewing Receipt</title>
-          <style>
-            body { 
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-              display: flex; flex-direction: column; align-items: center; justify-content: center; 
-              height: 100vh; margin: 0; background: #0f172a; color: #f8fafc; 
-            }
-            .loader { 
-              border: 3px solid rgba(249, 115, 22, 0.1); border-top: 3px solid #f97316; 
-              border-radius: 50%; width: 32px; height: 32px; animation: spin 0.8s ease-in-out infinite; 
-              margin-bottom: 24px; 
-            }
-            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            .brand { font-size: 11px; font-weight: 900; letter-spacing: 0.25em; color: #f97316; margin-bottom: 8px; text-transform: uppercase; }
-            .msg { font-size: 15px; font-weight: 400; opacity: 0.8; }
-          </style>
-        </head>
-        <body>
-          <div class="loader"></div>
-          <div class="brand">Mani Traveler Security</div>
-          <div class="msg">Decrypting and streaming your receipt document...</div>
-        </body>
-      </html>
-    `);
-
-    let realUrl = targetUrl;
+    let realUrl = url;
     
-    // Fetch if missing, only local ref (that isn't cached), or legacy 'pdf_placeholder'
-    const isLocalRef = realUrl && realUrl.startsWith('local_receipt_ref_');
-    const hasLocalCopy = isLocalRef && !!localStorage.getItem(realUrl);
-    
-    if (storagePath && (!realUrl || (isLocalRef && !hasLocalCopy) || realUrl === 'pdf_placeholder')) {
+    if (storagePath) {
       try {
         const fileRef = ref(storage, storagePath);
         realUrl = await getDownloadURL(fileRef);
-      } catch (err: any) {
-        if (err && (err.code === 'storage/retry-limit-exceeded' || String(err).includes('retry-limit-exceeded'))) {
-          console.warn("Storage is offline or unprovisioned. Using local fallback for open document.");
-        } else {
-          console.warn("Could not get fresh download URL:", err);
-        }
+      } catch (err) {
+        console.error("Failed to get fresh download URL:", err);
+        // If we fail to get URL, we'll try the provided url if it exists
       }
     }
 
-    if (!realUrl || realUrl === 'pdf_placeholder') {
-      newWin.document.body.innerHTML = '<div style="color:#ef4444; font-family:sans-serif; text-align:center; padding:20px;">Receipt not found. Link may have expired.</div>';
-      setTimeout(() => newWin.close(), 3000);
-      toast.error("Document link expired.");
+    if (!realUrl) {
+      newWin.close();
+      toast.error("Document link expired or missing.");
       return;
     }
     
     const realData = getReceiptData(realUrl);
-    const finalIsPdf = isPdfReceipt(realUrl, storagePath);
 
-    if (finalIsPdf) {
-      if (realData.startsWith('data:')) {
-        try {
-          const parts = realData.split(',');
-          const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/pdf';
-          const b64 = parts[1];
-          
-          const bin = atob(b64);
-          const len = bin.length;
-          const bytes = new Uint8Array(len);
-          for (let i = 0; i < len; i++) {
-            bytes[i] = bin.charCodeAt(i);
-          }
-          const blob = new Blob([bytes], { type: mime });
-          const blobUrl = URL.createObjectURL(blob);
-          newWin.location.replace(blobUrl);
-        } catch (err) {
-          console.error("PDF Blob conversion failed", err);
-          newWin.location.replace(realData);
+    if (realData.startsWith('data:')) {
+      try {
+        const base64Parts = realData.split(';base64,');
+        let actualBase64 = realData;
+        let mimeType = isPdfReceipt(realUrl) ? 'application/pdf' : 'image/jpeg';
+        
+        if (base64Parts.length === 2) {
+          mimeType = base64Parts[0].replace('data:', '');
+          actualBase64 = base64Parts[1];
         }
-      } else if (storagePath) {
-        try {
-          const arrayBuffer = await getBytes(ref(storage, storagePath));
-          const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
-          const blobUrl = URL.createObjectURL(blob);
-          newWin.location.replace(blobUrl);
-        } catch (err) {
-          console.error("Failed to fetch PDF bytes using Storage SDK for popup:", err);
-          try {
-            const res = await fetch(realData);
-            const blob = await res.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            newWin.location.replace(blobUrl);
-          } catch (innerErr) {
-            console.error("Fallback fetch also failed, falling back to direct URL:", innerErr);
-            newWin.location.replace(realData);
-          }
+
+        const byteCharacters = atob(actualBase64);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
         }
-      } else {
-        try {
-          const res = await fetch(realData);
-          const blob = await res.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          newWin.location.replace(blobUrl);
-        } catch (err) {
-          console.error("Fetch of remote URL failed for popup, falling back to direct URL:", err);
-          newWin.location.replace(realData);
-        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+        const fileURL = URL.createObjectURL(blob);
+        newWin.location.href = fileURL;
+      } catch (err) {
+        console.error("Failed to open data URL in new tab:", err);
+        newWin.close();
+        toast.error("Could not open local document.");
       }
     } else {
-      newWin.location.replace(realData);
+      // For cloud URLs, append timestamp to bypass cache
+      const separator = realData.includes('?') ? '&' : '?';
+      newWin.location.href = `${realData}${separator}t=${Date.now()}`;
     }
   };
 
@@ -638,8 +325,9 @@ export default function TripDetail() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const ongoingUploadsRef = useRef<Record<string, Promise<string>>>({});
   const [isUploadingFile, setIsUploadingFile] = useState(false);
-  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
+  const [isParsingReceipt, setIsParsingReceipt] = useState(false);
   const [receiptFileName, setReceiptFileName] = useState<string | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
@@ -832,83 +520,103 @@ export default function TripDetail() {
             resolve(file);
           }
         };
-        img.onerror = () => resolve(file);
         img.src = event.target?.result as string;
       };
-      reader.onerror = () => resolve(file);
       reader.readAsDataURL(file);
     });
   };
 
   const handleFileUpload = async (file: File) => {
     if (!activeTrip) return;
+    setIsUploadingFile(true);
     setReceiptFileName(file.name);
     
-    const isPdf = !file.type.startsWith('image/') || file.name.slice(-4).toLowerCase() === '.pdf';
-    const fileExt = isPdf ? 'pdf' : 'jpg';
-    const storagePath = `trips/${activeTrip.id}/receipts/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
-    
-    // 1. Set the storage path immediately so it can be saved with the expense
-    setReceiptStoragePath(storagePath);
-    
-    // 2. Show instant preview
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const localKey = `local_receipt_ref_${Date.now()}`;
-      saveReceiptToLocal(localKey, reader.result as string);
+    try {
+      // Compress first if it's an image
+      const compressedFile = await compressImage(file);
+      
+      // Step 1: Immediately read the file/compressed image as local Base64 for instant rendering
+      const localBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(compressedFile);
+      });
+      
+      // Generate a unique local cache reference key so we do NOT write megabytes of raw Base64 data directly to Firestore
+      const isPdf = !file.type.startsWith('image/') || file.name.slice(-4).toLowerCase() === '.pdf';
+      const localKey = `local_receipt_ref_${Date.now()}_${isPdf ? 'pdf' : 'img'}`;
+      
+      // Cache the full image/PDF data locally on this browser for reference
+      saveReceiptToLocal(localKey, localBase64);
+      
+      // Set the temporary local key in the state so the user gets an instant preview in the form!
       setReceiptImage(localKey);
-    };
-    reader.readAsDataURL(file);
 
-    // 3. Background upload - completely non-blocking but tracks status
-    setIsUploadingFile(true);
-    (async () => {
-      try {
-        const uploadFile = isPdf ? file : await compressImage(file);
-        const fileRef = ref(storage, storagePath);
-        
-        // Using resumable for better reliability
-        const uploadTask = uploadBytesResumable(fileRef, uploadFile, { 
-          contentType: isPdf ? 'application/pdf' : 'image/jpeg' 
+      // Trigger Gemini Vision parsing in the background if it's an image
+      if (!isPdf && isAddingExpense) {
+        setIsParsingReceipt(true);
+        toast.info("Scanning receipt with AI...");
+        fetch('/api/parse-receipt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: localBase64, mimeType: file.type || 'image/jpeg' })
+        })
+        .then(async (res) => {
+          if (res.ok) {
+            const data = await res.json();
+            setNewExpense(prev => ({
+              ...prev,
+              description: data.description || prev.description,
+              amount: data.amount ? Number(data.amount) : prev.amount,
+              date: data.date || prev.date,
+              category: data.category || prev.category
+            }));
+            toast.success("Receipt scanned successfully!");
+          } else {
+            const errData = await res.json().catch(() => ({}));
+            toast.error(errData.error || "Failed to parse receipt details.");
+          }
+        })
+        .catch((e) => {
+          console.error("Parse failed", e);
+          toast.error("Network error while parsing receipt.");
+        })
+        .finally(() => {
+          setIsParsingReceipt(false);
         });
-
-        // Create a wrapper promise so we can track it if needed
-        pendingUploadRef.current = new Promise((resolve, reject) => {
-          uploadTask.on('state_changed', 
-            null,
-            (error) => {
-              if (error && (error.code === 'storage/retry-limit-exceeded' || String(error).includes('retry-limit-exceeded'))) {
-                console.warn("Storage upload task failed (offline/unprovisioned storage):", error);
-              } else {
-                console.error("Storage upload task failed:", error);
-              }
-              reject(error);
-            },
-            async () => {
-              try {
-                const url = await getDownloadURL(fileRef);
-                setReceiptImage(url);
-                resolve({ url, path: storagePath });
-              } catch (err) {
-                reject(err);
-              }
-            }
-          );
-        });
-
-        await pendingUploadRef.current;
-      } catch (err: any) {
-        if (err && (err.code === 'storage/retry-limit-exceeded' || String(err).includes('retry-limit-exceeded'))) {
-          console.warn("Background upload failed (offline/unprovisioned storage):", err);
-        } else {
-          console.error("Background upload failed:", err);
-          toast.error("Cloud document sync failed. Using local copy for now.");
-        }
-      } finally {
-        setIsUploadingFile(false);
-        pendingUploadRef.current = null;
       }
-    })();
+      
+      // Step 2: Cloud upload in background so UI isn't blocked.
+      const fileExt = isPdf ? 'pdf' : 'jpg';
+      const path = `trips/${activeTrip.id}/receipts/${Date.now()}_${isPdf ? 'doc_pdf' : 'img'}.${fileExt}`;
+      const fileRef = ref(storage, path);
+      
+      setReceiptStoragePath(path);
+      setIsUploadingFile(false); // Unblock immediately
+
+      const uploadPromise = uploadBytes(fileRef, compressedFile, { 
+        contentType: isPdf ? 'application/pdf' : 'image/jpeg' 
+      }).then(async () => {
+        const downloadUrl = await getDownloadURL(fileRef);
+        if (downloadUrl) {
+          setReceiptImage(prev => prev && prev.startsWith('local_receipt_ref_') ? downloadUrl : prev);
+          console.log("Cloud storage upload succeeded, set permanently synced Cloud URL:", downloadUrl);
+        }
+        return downloadUrl;
+      }).catch(bgError => {
+        console.warn("Cloud upload failed or user is offline:", bgError);
+        toast.warning("Background cloud upload failed.");
+        return null;
+      });
+
+      ongoingUploadsRef.current[path] = uploadPromise;
+    } catch (error: any) {
+      console.error("File upload failed:", error);
+      toast.error("Failed to read file.");
+      setIsUploadingFile(false);
+      setReceiptFileName(null);
+    }
   };
 
   const startCamera = async () => {
@@ -962,7 +670,10 @@ export default function TripDetail() {
       toast.error('This ledger is locked for editing by the Trip Leader');
       return;
     }
-    
+    if (isUploadingFile) {
+      toast.error('Please wait until the receipt upload is completed.');
+      return;
+    }
     const finalCategory = newExpense.category === 'Other' ? (customCategory || 'Other') : newExpense.category;
     const now = new Date();
     const defaultTime = formatTime(now); // Requires 'formatTime' import if not already
@@ -984,43 +695,10 @@ export default function TripDetail() {
     }
     
     let finalReceiptUrl = receiptImage;
-    const finalStoragePath = receiptStoragePath;
-
-    if (pendingUploadRef.current) {
-      const waitToast = toast.loading("Finalizing cloud sync...");
-      try {
-        const result = await pendingUploadRef.current;
-        finalReceiptUrl = result.url;
-        toast.dismiss(waitToast);
-      } catch (err: any) {
-        if (err && (err.code === 'storage/retry-limit-exceeded' || String(err).includes('retry-limit-exceeded'))) {
-          console.warn("Pending upload wait failed (offline/unprovisioned storage):", err);
-        } else {
-          console.error("Pending upload wait failed:", err);
-        }
-        toast.dismiss(waitToast);
-      }
-    }
-
-    // Try to pre-resolve direct cloud URL if only path is set or we have placeholders
-    if (finalStoragePath && (!finalReceiptUrl || finalReceiptUrl.startsWith('local_receipt_ref_') || finalReceiptUrl === 'pdf_placeholder')) {
-      try {
-        finalReceiptUrl = await getDownloadURL(ref(storage, finalStoragePath));
-      } catch (err) {
-        console.warn("Could not get final receipt URL pre-save:", err);
-      }
-    }
-
-    if (finalReceiptUrl && finalReceiptUrl.startsWith('local_receipt_ref_')) {
-      const base64Data = localStorage.getItem(finalReceiptUrl);
-      if (base64Data) {
-        finalReceiptUrl = base64Data;
-      } else {
-        finalReceiptUrl = null;
-      }
-    }
     
-    await addExpense(activeTrip.id, {
+    const currentStoragePath = receiptStoragePath;
+
+    const expenseId = await addExpense(activeTrip.id, {
       ...newExpense,
       time: newExpense.time || defaultTime,
       category: finalCategory,
@@ -1030,9 +708,22 @@ export default function TripDetail() {
       payerName: selectedPayerName,
       createdByName: user?.displayName || 'Unknown',
       ...(finalReceiptUrl ? { receiptUrl: finalReceiptUrl } : {}),
-      ...(finalStoragePath ? { receiptStoragePath: finalStoragePath } : {})
+      ...(currentStoragePath ? { receiptStoragePath: currentStoragePath } : {})
     });
-    closeModal();
+    
+    // Attach dynamically resolved background uploaded URL if the user saved rapidly
+    if (expenseId && currentStoragePath && finalReceiptUrl?.startsWith('local_receipt_ref_') && updateExpense) {
+      const p = ongoingUploadsRef.current[currentStoragePath];
+      if (p) {
+        p.then((downloadUrl) => {
+          if (downloadUrl) {
+            updateExpense(activeTrip.id, expenseId, { receiptUrl: downloadUrl });
+          }
+        }).catch((err) => console.error("Failed post-upload update", err));
+      }
+    }
+    
+    setIsAddingExpense(false);
     setSplitOption('all');
     setCustomParticipants([]);
     setReceiptImage(null);
@@ -1295,7 +986,7 @@ export default function TripDetail() {
                       Yes, Withdraw Request
                     </button>
                     <button
-                      onClick={() => closeModal()}
+                      onClick={() => setIsConfirmingWithdraw(false)}
                       className="flex-1 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-100 rounded-xl text-xs font-bold uppercase tracking-wider transition-all"
                     >
                       Cancel
@@ -1758,17 +1449,17 @@ export default function TripDetail() {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-8 w-full overflow-hidden">
+      <div className="grid lg:grid-cols-12 gap-8">
         {/* Expenses Table Section */}
-        <div className="lg:col-span-8 w-full min-w-0">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden h-full flex flex-col w-full max-w-full">
-            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex flex-col gap-4 shrink-0 w-full overflow-hidden">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 w-full">
-                <div className="min-w-0">
-                  <h4 className="text-xs font-bold text-slate-800 dark:text-white uppercase tracking-widest truncate">Transaction Records</h4>
-                  <p className="text-[10px] text-slate-400 font-medium mt-0.5 truncate">Verified expenses for all members.</p>
+        <div className="lg:col-span-8">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden h-full flex flex-col">
+            <div className="px-6 py-5 border-b border-slate-100 dark:border-slate-800 flex flex-col gap-4 shrink-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800 dark:text-white uppercase tracking-widest">Transaction Records</h4>
+                  <p className="text-[10px] text-slate-400 font-medium mt-0.5">Verified expenses for all members.</p>
                 </div>
-                <div className="flex items-center gap-3 self-start sm:self-auto overflow-x-auto scrollbar-hide pb-1 sm:pb-0 w-full sm:w-auto">
+                <div className="flex items-center gap-3 self-start sm:self-auto">
                   <button
                     onClick={() => setIsFiltersOpen(!isFiltersOpen)}
                     className={cn(
@@ -1901,26 +1592,30 @@ export default function TripDetail() {
                     transition={{ delay: idx * 0.02 }}
                     className="flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded-2xl transition-colors group"
                   >
-                      <div className="flex items-center gap-4 min-w-0">
-                        <div className="w-12 h-12 rounded-2xl bg-orange-50 dark:bg-orange-950/30 text-orange-500 flex items-center justify-center font-bold text-xl border border-orange-100/50 dark:border-orange-900/20 group-hover:scale-110 transition-transform shrink-0">
-                          {expense.category === 'Food' ? '🍕' : expense.category === 'Transport' ? '🛥️' : expense.category === 'Stay' ? '🏨' : expense.category === 'Fun' ? '🎡' : '💸'}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h5 className="text-sm md:text-base font-bold text-slate-800 dark:text-white flex flex-wrap items-center gap-2 leading-tight break-words">
-                            {expense.description}
-                             {(expense.receiptUrl || expense.receiptStoragePath) && (
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-orange-50 dark:bg-orange-950/30 text-orange-500 flex items-center justify-center font-bold text-xl border border-orange-100/50 dark:border-orange-900/20 group-hover:scale-110 transition-transform">
+                        {expense.category === 'Food' ? '🍕' : expense.category === 'Transport' ? '🛥️' : expense.category === 'Stay' ? '🏨' : expense.category === 'Fun' ? '🎡' : '💸'}
+                      </div>
+                      <div>
+                        <h5 className="text-sm md:text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                          {expense.description}
+                           {expense.receiptUrl && (
                             <button 
                               onClick={() => {
-                                setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
-                                setPreviewStoragePath(expense.receiptStoragePath);
+                                if (isPdfReceipt(expense.receiptUrl)) {
+                                  handleOpenDocument(expense.receiptUrl!, expense.receiptStoragePath);
+                                } else {
+                                  setPreviewReceipt(expense.receiptUrl!);
+                                  setPreviewStoragePath(expense.receiptStoragePath);
+                                }
                               }}
                               className="text-slate-400 hover:text-orange-500 transition-colors"
-                              title={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? "View PDF Document" : "View Image Receipt"}
+                              title={isPdfReceipt(expense.receiptUrl) ? "View PDF Receipt" : "View Image Receipt"}
                             >
-                              {isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? (
-                                <FileText className="w-4 h-4 text-rose-500 hover:scale-110 transition-all" />
+                              {isPdfReceipt(expense.receiptUrl) ? (
+                                <FileText className="w-4 h-4" />
                               ) : (
-                                <ImageIcon className="w-4 h-4 text-emerald-500 hover:scale-110 transition-all" />
+                                <ImageIcon className="w-4 h-4" />
                               )}
                             </button>
                           )}
@@ -1954,27 +1649,20 @@ export default function TripDetail() {
                               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> Shared with {expense.participants?.length || activeTrip?.members?.length || 0}
                             </span>
                           )}
-                           {(expense.receiptUrl || expense.receiptStoragePath) && (
+                          {expense.receiptUrl && (
                             <button 
                               onClick={() => {
-                                setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
-                                setPreviewStoragePath(expense.receiptStoragePath);
+                                if (isPdfReceipt(expense.receiptUrl)) {
+                                  handleOpenDocument(expense.receiptUrl!, expense.receiptStoragePath);
+                                } else {
+                                  setPreviewReceipt(expense.receiptUrl!);
+                                  setPreviewStoragePath(expense.receiptStoragePath);
+                                }
                               }}
-                              className={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath)
-                                ? "px-2 py-0.5 rounded-full bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-950/50 text-rose-600 dark:text-rose-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-rose-100 dark:border-rose-900/10 hover:scale-105"
-                                : "px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-emerald-100 dark:border-emerald-900/10 hover:scale-105"
-                              }
-                              title={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? "Click to view PDF receipt details" : "Click to view image receipt details"}
+                              className="px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-emerald-100 dark:border-emerald-900/10"
+                              title="Click to view full receipt"
                             >
-                              {isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? (
-                                <>
-                                  <FileText className="w-2.5 h-2.5 text-rose-500" /> PDF Receipt
-                                </>
-                              ) : (
-                                <>
-                                  <Receipt className="w-2.5 h-2.5 text-emerald-500" /> View Receipt
-                                </>
-                              )}
+                              <Receipt className="w-2.5 h-2.5" /> View Receipt
                             </button>
                           )}
                         </div>
@@ -1997,11 +1685,11 @@ export default function TripDetail() {
           </div>
         </div>
 
-        <div className="lg:col-span-4 flex flex-col gap-6 w-full min-w-0">
+        <div className="lg:col-span-4 flex flex-col gap-6">
           {/* Detailed Members List */}
-          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm w-full overflow-hidden">
-            <div className="flex items-center justify-between mb-6 border-b border-slate-100 dark:border-slate-800 pb-3 w-full">
-              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">Active Members</h3>
+          <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm">
+            <div className="flex items-center justify-between mb-6 border-b border-slate-100 dark:border-slate-800 pb-3">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Members</h3>
               <span className="text-[10px] font-bold text-orange-500 uppercase">{approvedMembers.length} Approved</span>
             </div>
 
@@ -2020,32 +1708,32 @@ export default function TripDetail() {
 
             <div className="space-y-5">
               {approvedMembers.map((member) => (
-                  <div key={member.uid} className="flex items-center justify-between group w-full overflow-hidden">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="relative shrink-0">
-                        <UserAvatar 
-                          uid={member.uid}
-                          displayName={member.displayName}
-                          photoURL={member.photoURL}
-                          className="w-10 h-10 font-bold border-2 border-white dark:border-slate-800 shadow-sm"
-                        />
-                        {member.lastActive && (Date.now() - member.lastActive) < 40000 ? (
-                          <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.7)]" title="Active now" />
-                        ) : (
-                          <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-slate-300 dark:bg-slate-700 border-2 border-white dark:border-slate-900 rounded-full" title="Offline" />
-                        )}
-                      </div>
-                      <div className="flex flex-col min-w-0">
-                        <span className="text-xs font-bold text-slate-800 dark:text-white truncate">{member.displayName}</span>
-                        <span className={cn(
-                          "text-[9px] font-bold uppercase tracking-wider truncate",
-                          member.role === 'owner' ? "text-orange-500" : "text-slate-400"
-                        )}>
-                          {member.role === 'owner' ? 'Trip Leader' : 'Traveler'}
-                        </span>
-                      </div>
+                <div key={member.uid} className="flex items-center justify-between group">
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <UserAvatar 
+                        uid={member.uid}
+                        displayName={member.displayName}
+                        photoURL={member.photoURL}
+                        className="w-10 h-10 font-bold border-2 border-white dark:border-slate-800 shadow-sm"
+                      />
+                      {member.lastActive && (Date.now() - member.lastActive) < 40000 ? (
+                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 border-2 border-white dark:border-slate-900 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.7)]" title="Active now" />
+                      ) : (
+                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-slate-300 dark:bg-slate-700 border-2 border-white dark:border-slate-900 rounded-full" title="Offline" />
+                      )}
                     </div>
-                    <div className="text-right flex flex-col items-end shrink-0 ml-2">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-slate-800 dark:text-white truncate max-w-[120px]">{member.displayName}</span>
+                      <span className={cn(
+                        "text-[9px] font-bold uppercase tracking-wider",
+                        member.role === 'owner' ? "text-orange-500" : "text-slate-400"
+                      )}>
+                        {member.role === 'owner' ? 'Trip Leader' : 'Traveler'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right flex flex-col items-end">
                     <span className="text-[9px] font-bold text-slate-300 dark:text-slate-700 uppercase">Joined</span>
                     <span className="text-[9px] font-bold text-slate-400 uppercase">{member.joinedAt?.toDate ? formatDate(member.joinedAt.toDate()) : 'Now'}</span>
                   </div>
@@ -2168,14 +1856,18 @@ export default function TripDetail() {
         </div>
       </div>
 
-      {/* Add Expense Modal */}
-      <AnimatePresence>
-        {isAddingExpense && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+      {createPortal((
+        <>
+          {/* Add Expense Modal */}
+          <AnimatePresence>
+            {isAddingExpense && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          >
+            <div 
               className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
               onClick={() => setIsAddingExpense(false)}
             />
@@ -2183,23 +1875,15 @@ export default function TripDetail() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]"
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl p-8 shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 max-h-[85vh] overflow-y-auto"
             >
-              <div className="p-6 pb-2 shrink-0">
-                <h2 className="text-2xl font-black dark:text-white flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Receipt className="w-6 h-6 text-orange-500" />
-                    Track Expense
-                  </div>
-                  <button onClick={closeModal} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
-                    <X className="w-5 h-5 text-slate-400" />
-                  </button>
-                </h2>
-              </div>
-              
-              <form onSubmit={handleAddExpense} className="flex flex-col min-h-0 overflow-hidden">
-                <div className="flex-1 overflow-y-auto p-6 pt-2 space-y-5 scrollbar-hide">
-                  {/* Hands-free Voice Logger Banner */}
+              <h2 className="text-2xl font-black mb-6 dark:text-white flex items-center gap-3">
+                <Receipt className="w-6 h-6 text-orange-500" />
+                Track Expense
+              </h2>
+              <form onSubmit={handleAddExpense} className="space-y-5">
+                {/* Hands-free Voice Logger Banner */}
                 <div className="bg-orange-50/50 dark:bg-orange-950/20 border border-orange-100 dark:border-orange-900/30 rounded-2xl p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -2418,10 +2102,17 @@ export default function TripDetail() {
                       </div>
 
                       {/* Display Uploading Status or Preview */}
-                      {isUploadingFile && (
+                      {isUploadingFile && !isParsingReceipt && (
                         <div className="flex items-center gap-2 text-xs text-orange-500 font-bold uppercase tracking-widest pl-1 mt-1">
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Processing...</span>
+                          <span>Uploading receipt...</span>
+                        </div>
+                      )}
+                      
+                      {isParsingReceipt && (
+                        <div className="flex items-center gap-2 text-xs text-emerald-500 font-bold uppercase tracking-widest pl-1 mt-1">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Scanning with AI...</span>
                         </div>
                       )}
 
@@ -2430,17 +2121,21 @@ export default function TripDetail() {
                           <div 
                             className="flex items-center gap-2.5 min-w-0 font-medium cursor-pointer group/preview"
                             onClick={() => {
-                              setPreviewReceipt(receiptImage);
-                              setPreviewStoragePath(receiptStoragePath);
+                              if (isPdfReceipt(receiptImage) || receiptFileName?.toLowerCase().includes('.pdf')) {
+                                handleOpenDocument(receiptImage, receiptStoragePath);
+                              } else {
+                                setPreviewReceipt(receiptImage);
+                                setPreviewStoragePath(receiptStoragePath);
+                              }
                             }}
                           >
-                            {isPdfReceipt(receiptImage, receiptStoragePath) || receiptFileName?.toLowerCase().includes('.pdf') ? (
+                            {isPdfReceipt(receiptImage) || receiptFileName?.toLowerCase().includes('.pdf') ? (
                               <div className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-950/30 flex items-center justify-center border border-red-100/50 dark:border-red-900/20 text-red-500 shrink-0 group-hover/preview:scale-110 transition-transform">
                                 <FileText className="w-5 h-5" />
                               </div>
                             ) : (
-                              <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-755 bg-black group-hover/preview:scale-110 transition-transform">
-                                <img src={getReceiptData(receiptImage) || undefined} alt="Receipt preview" className="w-full h-full object-cover" />
+                              <div className="w-8 h-8 rounded-lg overflow-hidden shrink-0 border border-slate-200 dark:border-slate-750 bg-black group-hover/preview:scale-110 transition-transform">
+                                <img src={getReceiptData(receiptImage)} alt="Receipt preview" className="w-full h-full object-cover" />
                               </div>
                             )}
                             <span className="text-xs font-bold truncate pr-3 max-w-[180px] dark:text-white group-hover/preview:text-orange-500 transition-colors">
@@ -2480,10 +2175,7 @@ export default function TripDetail() {
 
                 <div>
                   <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5 pt-2">Split Preference</label>
-                  <div 
-                    className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1 overflow-x-auto scrollbar-hide"
-                    style={{ height: '51.9141px' }}
-                  >
+                  <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl gap-1">
                     <button
                       type="button"
                       onClick={() => {
@@ -2574,66 +2266,61 @@ export default function TripDetail() {
                   )}
                 </AnimatePresence>
                 
-                </div>
-                
-                <div 
-                  className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-sm shrink-0 flex gap-3 overflow-x-auto scrollbar-hide"
-                  style={{ width: '321.758px', height: '121.207px', maxWidth: '100%' }}
-                >
+                <div className="pt-4 flex gap-3">
                   <button 
                     type="button"
-                    onClick={closeModal}
-                    className="flex-1 h-12 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-xs uppercase tracking-widest active:scale-95"
+                    onClick={() => setIsAddingExpense(false)}
+                    className="flex-1 h-12 rounded-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 transition-colors text-xs uppercase tracking-widest"
                   >
                     Cancel
                   </button>
                   <button 
                     type="submit"
                     disabled={isUploadingFile}
-                    className="flex-[2] h-12 rounded-xl font-black bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-lg shadow-orange-500/20 transition-all active:scale-95 text-xs uppercase tracking-widest flex items-center justify-center gap-2"
+                    className="flex-1 h-12 rounded-xl font-bold bg-slate-900 dark:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white shadow-xl transition-all active:scale-95 text-xs uppercase tracking-widest flex items-center justify-center gap-2"
                   >
                     {isUploadingFile ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin text-white" />
-                        Syncing...
+                        Uploading...
                       </>
                     ) : (
-                      <>
-                        Add Record
-                        <ArrowRight className="w-4 h-4" />
-                      </>
+                      "Add Record"
                     )}
                   </button>
                 </div>
               </form>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
       {/* Manage Access Modal */}
       <AnimatePresence>
         {isManagingAccess && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          >
+            <div 
               className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
-              onClick={closeModal}
+              onClick={() => setIsManagingAccess(false)}
             />
             <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto scrollbar-hide"
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 max-h-[85vh] overflow-y-auto"
             >
               <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/20">
                 <div>
                   <h2 className="text-lg font-black dark:text-white">Trip Control</h2>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Manage member access and invitations</p>
                 </div>
-                <button onClick={closeModal} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                <button onClick={() => setIsManagingAccess(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
                   <X className="w-5 h-5 text-slate-400" />
                 </button>
               </div>
@@ -2648,7 +2335,7 @@ export default function TripDetail() {
                     <div className="flex gap-2">
                       <button 
                         onClick={() => {
-                          closeModal();
+                          setIsManagingAccess(false);
                           navigate('/');
                         }}
                         className="flex-1 sm:flex-none h-12 px-5 flex items-center justify-center bg-slate-900 dark:bg-orange-600 text-white rounded-xl font-bold text-[10px] uppercase tracking-widest shadow-lg active:scale-95 transition-all"
@@ -2839,145 +2526,96 @@ export default function TripDetail() {
                 </div>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {previewReceipt && (
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-900/60 dark:bg-black/80 backdrop-blur-md scroll-smooth transition-all overflow-hidden">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm"
+            onClick={() => setPreviewReceipt(null)}
+          >
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-6 sm:p-10 w-full max-w-2xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.3)] relative max-h-[90vh] overflow-y-auto scrollbar-hide flex flex-col"
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 rounded-3xl p-6 sm:p-8 w-full max-w-lg shadow-2xl relative max-h-[85vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
             >
               <button 
                 onClick={() => setPreviewReceipt(null)}
-                className="absolute top-6 right-6 p-2.5 text-slate-400 hover:text-slate-600 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-full transition-all active:scale-90 hover:rotate-90"
+                className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white bg-slate-100 dark:bg-slate-800 rounded-full transition-colors"
               >
-                <X className="w-6 h-6" />
+                <X className="w-5 h-5" />
               </button>
-              
-              <div className="flex flex-col h-full">
-                <div className="mb-8">
-                  <h2 className="text-2xl font-black dark:text-white flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-500 shadow-inner">
-                      {isPdfReceipt(previewReceipt, previewStoragePath) ? (
-                        <FileText className="w-6 h-6" />
-                      ) : (
-                        <ImageIcon className="w-6 h-6" />
-                      )}
+              <h2 className="text-xl font-black mb-6 dark:text-white flex items-center gap-3">
+                {isPdfReceipt(previewReceipt) ? (
+                  <FileText className="w-6 h-6 text-orange-500" />
+                ) : (
+                  <ImageIcon className="w-6 h-6 text-orange-500" />
+                )}
+                Receipt
+              </h2>
+              <div className="flex flex-col gap-4 w-full">
+                <div className="flex justify-center w-full max-h-[50vh] min-h-[300px] overflow-auto rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/20">
+                  {isPdfReceipt(previewReceipt) ? (
+                    <div className="flex flex-col items-center justify-center p-8 text-center w-full">
+                      <div className="w-16 h-16 rounded-2xl bg-orange-500/10 flex items-center justify-center text-orange-500 mb-4 shadow-sm">
+                        <FileText className="w-8 h-8" />
+                      </div>
+                      <p className="text-sm font-bold text-slate-800 dark:text-slate-200 mb-2">Secure PDF Receipt Document</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mb-6 max-w-xs leading-relaxed">
+                        Modern secure browsers prevent loading PDF files inside of nested sandbox frames. Open the document directly below to view it safely in a fresh window.
+                      </p>
+                      <button 
+                        onClick={() => handleOpenDocument(previewReceipt, previewStoragePath)}
+                        className="px-6 py-3 bg-orange-500 hover:bg-orange-600 text-white text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-md inline-flex items-center gap-2 active:scale-95 cursor-pointer"
+                      >
+                        Open PDF in New Tab <ExternalLink className="w-4 h-4" />
+                      </button>
                     </div>
-                    <div>
-                      <p className="text-[10px] text-orange-500 font-black uppercase tracking-[0.2em] mb-1">Document Evidence</p>
-                      Receipt Details
-                    </div>
-                  </h2>
+                  ) : (
+                    <img src={getReceiptData(previewReceipt)} alt="Receipt" className="max-w-full h-auto object-contain rounded-xl" />
+                  )}
                 </div>
-
-                <div className="flex flex-col gap-6 flex-1 min-h-0">
-                  <div className="flex-1 flex justify-center w-full min-h-[350px] overflow-auto rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-2 relative">
-                    {isPreviewRefreshing ? (
-                      <div className="flex flex-col items-center justify-center p-12 text-center w-full">
-                        <div className="w-12 h-12 border-4 border-orange-500/30 border-t-orange-500 rounded-full animate-spin mb-4" />
-                        <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Refreshing Secure URL...</p>
-                      </div>
-                    ) : isPdfReceipt(freshPreviewUrl || previewReceipt, previewStoragePath) ? (
-                      <div className="w-full h-full flex flex-col relative min-h-[450px]">
-                        {isPdfLoading && !pdfBlobUrl && (
-                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white dark:bg-slate-900 z-20 rounded-2xl">
-                            <div className="w-12 h-12 border-4 border-rose-500/30 border-t-rose-500 rounded-full animate-spin mb-4" />
-                            <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Decrypting & Streaming PDF...</p>
-                          </div>
-                        )}
-                        <iframe 
-                          src={pdfBlobUrl || getReceiptData(freshPreviewUrl || previewReceipt) || undefined} 
-                          className="w-full h-full flex-1 rounded-2xl border-0 overflow-hidden shadow-inner bg-white dark:bg-slate-900"
-                          title="PDF Receipt Viewer"
-                          style={{ width: '100%', height: '100%' }}
-                        />
-                        <div className="absolute bottom-4 right-4 flex gap-2 z-10">
-                          <button 
-                            type="button"
-                            onClick={() => handleOpenDocument(freshPreviewUrl || previewReceipt, previewStoragePath)}
-                            className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold cursor-pointer border-0"
-                            title="Open in Native Viewer"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" /> Fullscreen View
-                          </button>
-                        </div>
-                      </div>
-                    ) : !isValidPreviewUrl(freshPreviewUrl || previewReceipt) ? (
-                      <div className="flex flex-col items-center justify-center p-8 text-center text-slate-400 w-full">
-                        <div className="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                          <ImageIcon className="w-8 h-8 text-slate-400" />
-                        </div>
-                        <p className="text-xs font-bold uppercase tracking-wider">No Preview Available</p>
-                        <p className="text-[10px] mt-2 max-w-[200px]">The receipt is not cached locally. Click "View Original" to open in a new browser tab.</p>
-                      </div>
-                    ) : (
-                      <div className="relative w-full h-full flex items-center justify-center">
-                        <img 
-                          src={getReceiptData(freshPreviewUrl || previewReceipt) || undefined} 
-                          alt="Receipt" 
-                          className="max-w-full h-auto object-contain rounded-2xl shadow-sm"
-                          onError={(e) => {
-                            console.warn("Receipt image load failed");
-                            const parent = e.currentTarget.parentElement;
-                            if (parent) {
-                              const errorDiv = document.createElement('div');
-                              errorDiv.className = "flex flex-col items-center justify-center p-8 text-center text-slate-400";
-                              errorDiv.innerHTML = `
-                                <div class="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-                                </div>
-                                <p class="text-xs font-bold uppercase tracking-wider">Image Load Failed</p>
-                                <p class="text-[10px] mt-2 max-w-[200px]">The document could not be loaded as an image. Try opening it in a new tab.</p>
-                              `;
-                              parent.appendChild(errorDiv);
-                              e.currentTarget.style.display = 'none';
-                            }
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800 mt-auto">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                      Verified by Trip Security
-                    </p>
-                    <button 
-                      onClick={() => handleOpenDocument(freshPreviewUrl || previewReceipt, previewStoragePath)}
-                      className="group text-[10px] font-black text-orange-500 hover:text-orange-600 transition-all flex items-center gap-2 cursor-pointer py-2 px-4 rounded-xl hover:bg-orange-50 dark:hover:bg-orange-950/20"
-                    >
-                      View Original <ExternalLink className="w-3.5 h-3.5 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
-                    </button>
-                  </div>
+                <div className="flex justify-end">
+                  <button 
+                    onClick={() => handleOpenDocument(previewReceipt, previewStoragePath)}
+                    className="text-xs font-bold text-orange-500 hover:text-orange-600 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    Open in New Tab <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
       {/* QR Code Invitation Modal */}
       <AnimatePresence>
         {isShowingQRModal && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+          >
+            <div 
               className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
               onClick={() => setIsShowingQRModal(false)}
             />
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[32px] shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 text-center max-h-[90vh] overflow-y-auto scrollbar-hide"
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[32px] overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 text-center max-h-[85vh] overflow-y-auto"
             >
               <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/20">
                 <div className="text-left">
@@ -3058,18 +2696,20 @@ export default function TripDetail() {
                 </div>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
       {/* Remove Member Confirmation Modal */}
       <AnimatePresence>
         {memberToRemoveId && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+          >
+            <div 
               className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
               onClick={() => setMemberToRemoveId(null)}
             />
@@ -3077,7 +2717,8 @@ export default function TripDetail() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[32px] overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 p-6 flex flex-col items-center text-center"
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[32px] overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 p-6 flex flex-col items-center text-center max-h-[85vh] overflow-y-auto"
             >
               <div className="w-14 h-14 bg-red-50 dark:bg-red-950/30 rounded-full flex items-center justify-center mb-4">
                 <UserMinus className="w-6 h-6 text-red-500" />
@@ -3108,18 +2749,20 @@ export default function TripDetail() {
                 </button>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
       {/* Approve Member Role Picker Modal */}
       <AnimatePresence>
         {memberToApprove && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+          >
+            <div 
               className="absolute inset-0 bg-slate-950/80 backdrop-blur-md"
               onClick={() => setMemberToApprove(null)}
             />
@@ -3127,7 +2770,8 @@ export default function TripDetail() {
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[32px] shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 p-6 max-h-[90vh] overflow-y-auto scrollbar-hide"
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 p-6 max-h-[85vh] overflow-y-auto"
             >
               <div className="flex justify-between items-start mb-5">
                 <div>
@@ -3207,10 +2851,12 @@ export default function TripDetail() {
                 Close
               </button>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
+        </>
+      ), document.body)}
     </div>
   );
 }

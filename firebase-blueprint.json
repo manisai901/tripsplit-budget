@@ -46,8 +46,6 @@
         "splitType": { "type": "string", "enum": ["equal", "exact", "percentage"] },
         "participants": { "type": "array", "description": "List of UIDs involved in the split." },
         "date": { "type": "string", "format": "date-time" },
-        "receiptUrl": { "type": "string", "description": "URL to the receipt image or PDF." },
-        "receiptStoragePath": { "type": "string", "description": "Internal storage path for the receipt." },
         "createdBy": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },

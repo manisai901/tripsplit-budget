@@ -88,7 +88,8 @@ interface TripContextType {
   setActiveTripId: (id: string | null) => void;
   createTrip: (data: Partial<Trip>) => Promise<void>;
   joinTrip: (tripId: string) => Promise<void>;
-  addExpense: (tripId: string, data: Partial<Expense>) => Promise<void>;
+  addExpense: (tripId: string, data: Partial<Expense>) => Promise<string | undefined>;
+  updateExpense: (tripId: string, expenseId: string, data: Partial<Expense>) => Promise<void>;
   addChecklistItem: (tripId: string, text: string, dueTime?: string) => Promise<void>;
   toggleChecklistItem: (tripId: string, itemId: string, completed: boolean) => Promise<void>;
   removeMember: (tripId: string, memberId: string) => Promise<void>;
@@ -300,10 +301,10 @@ export function TripProvider({ children }: { children: ReactNode }) {
   };
 
   const addExpense = async (tripId: string, data: Partial<Expense>) => {
-    if (!user) return;
+    if (!user) return undefined;
     try {
       checkWriteAccess(tripId);
-      await addDoc(collection(db, 'trips', tripId, 'expenses'), {
+      const docRef = await addDoc(collection(db, 'trips', tripId, 'expenses'), {
         ...data,
         payerId: data.payerId || user.uid,
         payerName: data.payerName || user.displayName,
@@ -312,9 +313,21 @@ export function TripProvider({ children }: { children: ReactNode }) {
         time: data.time || null
       });
       toast.success('Expense recorded successfully!');
+      return docRef.id;
     } catch (error: any) {
       handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/expenses`);
       toast.error(error.message || 'Failed to record expense');
+      return undefined;
+    }
+  };
+
+  const updateExpense = async (tripId: string, expenseId: string, data: Partial<Expense>) => {
+    if (!user) return;
+    try {
+      checkWriteAccess(tripId);
+      await updateDoc(doc(db, 'trips', tripId, 'expenses', expenseId), data);
+    } catch (error: any) {
+      console.error("Failed to update expense", error);
     }
   };
 
@@ -505,6 +518,7 @@ export function TripProvider({ children }: { children: ReactNode }) {
     createTrip, 
     joinTrip,
     addExpense,
+    updateExpense,
     addChecklistItem,
     toggleChecklistItem,
     removeMember,

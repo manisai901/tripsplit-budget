@@ -2,89 +2,18 @@ import { Plus, MapPin, Calendar, Users, ArrowRight, Wallet, ChevronRight, UserPl
 import { useTrip, Trip } from '../context/TripContext';
 import { useAuth } from '../context/AuthContext';
 import { formatDate, formatCurrency, cn } from '../lib/utils';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+import { createPortal } from 'react-dom';
 import { useState, FormEvent, useEffect } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { toast } from 'sonner';
+import { Link, useNavigate } from 'react-router-dom';
 import { UserAvatar } from './Avatar';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const { trips, createTrip, joinTrip, setActiveTripId, indexErrorUrl, isIndexBuilding, loading } = useTrip();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [isCreating, setIsCreating] = useState(false);
   const [isJoining, setIsJoining] = useState(false);
-
-  // Sync state to URL for back-button support
-  useEffect(() => {
-    const modal = searchParams.get('modal');
-    if (!modal) {
-      setIsCreating(false);
-      setIsJoining(false);
-    } else {
-      if (modal === 'create') setIsCreating(true);
-      if (modal === 'join') setIsJoining(true);
-    }
-  }, [searchParams]);
-
-  useEffect(() => {
-    const modal = searchParams.get('modal');
-    if (isCreating && modal !== 'create') setSearchParams({ modal: 'create' });
-    else if (isJoining && modal !== 'join') setSearchParams({ modal: 'join' });
-    else if (!isCreating && !isJoining && modal) {
-      // Handled by manual close now
-    }
-  }, [isCreating, isJoining]);
-
-  const closeModal = () => {
-    if (searchParams.get('modal')) {
-      navigate(-1);
-    } else {
-      setIsCreating(false);
-      setIsJoining(false);
-    }
-  };
-
-  // Hardware back button safety (prevents app closure on single back press from dashboard root)
-  useEffect(() => {
-    // Only apply if it's the home view
-    const handlePopState = (e: PopStateEvent) => {
-      if (window.location.pathname === '/' && !searchParams.get('modal')) {
-        // If the user hit back on the dashboard with no modal open
-        // We push a "stay" state to handle the next pop as an exit if they repeat quickly
-        // But for web, we just want to ensure we don't close the tab if we came from within the app.
-        // Actually, if we are at the bottom of the stack, hitting back will exit.
-      }
-    };
-
-    // A common PWA pattern to handle the hardware back button on Android
-    try {
-      const h = window.history;
-      if (h && h.length <= 2 && (!h.state || !h.state.isLanding)) {
-         h.replaceState({ isLanding: true }, '');
-         h.pushState({ isApp: true }, '');
-      }
-    } catch (e) {
-      console.warn('History API restricted');
-    }
-
-    const onPop = (e: PopStateEvent) => {
-      if (e.state && e.state.isLanding) {
-        toast("Press back again to exit", { 
-          icon: "🏠",
-          description: "Returning next time? Your journeys are safe.",
-          duration: 2000 
-        });
-        try {
-          window.history.pushState({ isApp: true }, '');
-        } catch (err) {}
-      }
-    };
-
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, [searchParams]);
   const [joinId, setJoinId] = useState('');
   const [newTrip, setNewTrip] = useState({ name: '', destination: '', budget: 0, currency: 'INR' });
 
@@ -184,7 +113,7 @@ export default function Dashboard() {
   const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     await createTrip(newTrip);
-    closeModal();
+    setIsCreating(false);
     setNewTrip({ name: '', destination: '', budget: 0, currency: 'INR' });
   };
 
@@ -192,7 +121,7 @@ export default function Dashboard() {
     e.preventDefault();
     if (!joinId.trim()) return;
     await joinTrip(joinId.trim());
-    closeModal();
+    setIsJoining(false);
     setJoinId('');
   };
 
@@ -462,20 +391,28 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Join Modal */}
-      {isJoining && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
-          <motion.div 
-            initial={{ opacity: 0 }}
+      {createPortal((
+        <>
+          {/* Join Modal */}
+          <AnimatePresence>
+            {isJoining && (
+              <motion.div 
+                initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="absolute inset-0 bg-black/60 backdrop-blur-md"
-            onClick={closeModal}
-          />
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-8 shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-6"
           >
+            <div 
+              className="absolute inset-0 bg-black/60 backdrop-blur-md"
+              onClick={() => setIsJoining(false)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-8 shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 max-h-[85vh] overflow-y-auto"
+            >
             <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center mb-6">
               <LinkIcon className="w-6 h-6 text-blue-500" />
             </div>
@@ -498,23 +435,30 @@ export default function Dashboard() {
               </button>
             </form>
           </motion.div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {/* Create Modal */}
-      {isCreating && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+      <AnimatePresence>
+        {isCreating && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="absolute inset-0 bg-black/60 backdrop-blur-md"
-            onClick={closeModal}
-          />
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-8 shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800"
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-6"
           >
+            <div 
+              className="absolute inset-0 bg-black/60 backdrop-blur-md"
+              onClick={() => setIsCreating(false)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-8 shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 max-h-[85vh] overflow-y-auto"
+            >
             <h2 className="text-2xl font-bold mb-6 dark:text-white">Plan New Journey</h2>
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
@@ -560,8 +504,11 @@ export default function Dashboard() {
               </div>
             </form>
           </motion.div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
+        </>
+      ), document.body)}
 
       <footer className="mt-16 pt-8 border-t border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 text-xs font-medium text-slate-500">
         <p>&copy; {new Date().getFullYear()} JourneyTracker.</p>
