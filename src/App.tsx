@@ -27,9 +27,13 @@ function AppContent() {
   const { user, loading: authLoading } = useAuth();
   const { activeTrip } = useTrip();
   const location = useLocation();
-  const [theme, setTheme] = useState<'light' | 'dark'>(
-    (localStorage.getItem('theme') as any) || 'light'
-  );
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try {
+      return (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
+    } catch (e) {
+      return 'light';
+    }
+  });
 
   // Network Status Notification Listener
   useEffect(() => {
@@ -77,7 +81,11 @@ function AppContent() {
     } else {
       document.documentElement.classList.remove('dark');
     }
-    localStorage.setItem('theme', theme);
+    try {
+      localStorage.setItem('theme', theme);
+    } catch (e) {
+      console.warn('Storage blocked');
+    }
   }, [theme]);
 
   // Scroll to top on route change or trip switch

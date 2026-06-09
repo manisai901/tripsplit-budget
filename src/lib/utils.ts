@@ -6,10 +6,14 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatCurrency(amount: number, currency: string = 'INR') {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-  }).format(amount);
+  try {
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: currency,
+    }).format(amount);
+  } catch (e) {
+    return `${currency} ${amount.toFixed(2)}`;
+  }
 }
 
 export function formatDate(date: string | Date) {

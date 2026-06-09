@@ -58,21 +58,27 @@ export default function Dashboard() {
       }
     };
 
-    // A common PWA pattern is to push a "landing" state
-    if (window.history.length <= 2 && !window.history.state?.isLanding) {
-       window.history.replaceState({ isLanding: true }, '');
-       window.history.pushState({ isApp: true }, '');
+    // A common PWA pattern to handle the hardware back button on Android
+    try {
+      const h = window.history;
+      if (h && h.length <= 2 && (!h.state || !h.state.isLanding)) {
+         h.replaceState({ isLanding: true }, '');
+         h.pushState({ isApp: true }, '');
+      }
+    } catch (e) {
+      console.warn('History API restricted');
     }
 
     const onPop = (e: PopStateEvent) => {
-      if (e.state?.isLanding) {
+      if (e.state && e.state.isLanding) {
         toast("Press back again to exit", { 
           icon: "🏠",
           description: "Returning next time? Your journeys are safe.",
           duration: 2000 
         });
-        // We stay by pushing the app state back
-        window.history.pushState({ isApp: true }, '');
+        try {
+          window.history.pushState({ isApp: true }, '');
+        } catch (err) {}
       }
     };
 

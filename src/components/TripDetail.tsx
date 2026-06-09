@@ -214,24 +214,32 @@ export default function TripDetail() {
   const [previewReceipt, setPreviewReceipt] = useState<string | null>(null);
   const [previewStoragePath, setPreviewStoragePath] = useState<string | null>(null);
   const [freshPreviewUrl, setFreshPreviewUrl] = useState<string | null>(null);
+  const [isPreviewRefreshing, setIsPreviewRefreshing] = useState(false);
 
   // Sync fresh URL for preview modal
   useEffect(() => {
     if (!previewReceipt && !previewStoragePath) {
       setFreshPreviewUrl(null);
+      setIsPreviewRefreshing(false);
       return;
     }
 
     if (previewStoragePath) {
+      setIsPreviewRefreshing(true);
       const fileRef = ref(storage, previewStoragePath);
       getDownloadURL(fileRef)
-        .then(url => setFreshPreviewUrl(url))
+        .then(url => {
+          setFreshPreviewUrl(url);
+          setIsPreviewRefreshing(false);
+        })
         .catch(err => {
           console.error("Failed to refresh preview URL:", err);
           setFreshPreviewUrl(previewReceipt); // Fallback
+          setIsPreviewRefreshing(false);
         });
     } else {
       setFreshPreviewUrl(previewReceipt);
+      setIsPreviewRefreshing(false);
     }
   }, [previewReceipt, previewStoragePath]);
 
@@ -327,6 +335,8 @@ export default function TripDetail() {
 
   const getReceiptData = (url: string | null): string => {
     if (!url) return '';
+    // Handle data URLs directly
+    if (url.startsWith('data:')) return url;
     if (url.startsWith('local_receipt_ref_')) {
       return localStorage.getItem(url) || '';
     }
@@ -335,7 +345,12 @@ export default function TripDetail() {
 
   const isPdfReceipt = (url: string | null): boolean => {
     if (!url) return false;
-    return url.includes('_pdf') || url.includes('application/pdf') || url.toLowerCase().includes('.pdf');
+    const lower = url.toLowerCase();
+    return lower.includes('application/pdf') || 
+           lower.includes('.pdf') || 
+           lower.includes('_pdf') ||
+           lower.includes('data:pdf') ||
+           url.startsWith('data:application/pdf');
   };
 
   const handleOpenDocument = async (url: string | null, storagePath?: string | null) => {
@@ -2610,8 +2625,13 @@ export default function TripDetail() {
                 </div>
 
                 <div className="flex flex-col gap-6 flex-1 min-h-0">
-                  <div className="flex-1 flex justify-center w-full min-h-[350px] overflow-auto rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-2">
-                    {isPdfReceipt(previewReceipt) ? (
+                  <div className="flex-1 flex justify-center w-full min-h-[350px] overflow-auto rounded-3xl border-2 border-dashed border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/40 p-2 relative">
+                    {isPreviewRefreshing ? (
+                      <div className="flex flex-col items-center justify-center p-12 text-center w-full">
+                        <div className="w-12 h-12 border-4 border-orange-500/30 border-t-orange-500 rounded-full animate-spin mb-4" />
+                        <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Refreshing Secure URL...</p>
+                      </div>
+                    ) : isPdfReceipt(freshPreviewUrl || previewReceipt) ? (
                       <div className="flex flex-col items-center justify-center p-12 text-center w-full">
                         <div className="w-20 h-20 rounded-3xl bg-orange-500 text-white flex items-center justify-center shadow-2xl mb-6 transform -rotate-3 hover:rotate-0 transition-transform duration-500">
                           <FileText className="w-10 h-10" />
@@ -2630,14 +2650,30 @@ export default function TripDetail() {
                         </button>
                       </div>
                     ) : (
-                      <img 
-                        src={getReceiptData(freshPreviewUrl || previewReceipt)} 
-                        alt="Receipt" 
-                        className="max-w-full h-auto object-contain rounded-2xl shadow-sm"
-                        onError={(e) => {
-                          console.error("Image load failed");
-                        }}
-                      />
+                      <div className="relative w-full h-full flex items-center justify-center">
+                        <img 
+                          src={getReceiptData(freshPreviewUrl || previewReceipt)} 
+                          alt="Receipt" 
+                          className="max-w-full h-auto object-contain rounded-2xl shadow-sm"
+                          onError={(e) => {
+                            console.error("Image load failed");
+                            const parent = e.currentTarget.parentElement;
+                            if (parent) {
+                              const errorDiv = document.createElement('div');
+                              errorDiv.className = "flex flex-col items-center justify-center p-8 text-center text-slate-400";
+                              errorDiv.innerHTML = `
+                                <div class="w-16 h-16 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+                                </div>
+                                <p class="text-xs font-bold uppercase tracking-wider">Image Load Failed</p>
+                                <p class="text-[10px] mt-2 max-w-[200px]">The document could not be loaded as an image. Try opening it in a new tab.</p>
+                              `;
+                              parent.appendChild(errorDiv);
+                              e.currentTarget.style.display = 'none';
+                            }
+                          }}
+                        />
+                      </div>
                     )}
                   </div>
                   

@@ -37,8 +37,13 @@ export default function AuthScreen({ theme, setTheme }: AuthScreenProps) {
     try {
       setError(null);
       const now = Date.now();
-      const rawAttempts = localStorage.getItem('traveler_login_attempts');
-      let attempts: number[] = rawAttempts ? JSON.parse(rawAttempts) : [];
+      let attempts: number[] = [];
+      try {
+        const rawAttempts = localStorage.getItem('traveler_login_attempts');
+        attempts = rawAttempts ? JSON.parse(rawAttempts) : [];
+      } catch (e) {
+        console.warn('LocalStorage blocked or invalid');
+      }
 
       // Filter out stamps older than 60 seconds
       attempts = attempts.filter(t => now - t < 60000);
@@ -51,7 +56,9 @@ export default function AuthScreen({ theme, setTheme }: AuthScreenProps) {
       }
 
       attempts.push(now);
-      localStorage.setItem('traveler_login_attempts', JSON.stringify(attempts));
+      try {
+        localStorage.setItem('traveler_login_attempts', JSON.stringify(attempts));
+      } catch (e) {}
 
       await loginWithGoogle();
     } catch (err: any) {
