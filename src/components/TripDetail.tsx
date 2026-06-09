@@ -215,6 +215,7 @@ export default function TripDetail() {
   const [previewStoragePath, setPreviewStoragePath] = useState<string | null>(null);
   const [freshPreviewUrl, setFreshPreviewUrl] = useState<string | null>(null);
   const [isPreviewRefreshing, setIsPreviewRefreshing] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
 
   // Sync fresh URL for preview modal
   useEffect(() => {
@@ -255,6 +256,52 @@ export default function TripDetail() {
       setIsPreviewRefreshing(false);
     }
   }, [previewReceipt, previewStoragePath]);
+
+  // Convert/cache PDF Data as Local Blob URI for highly compatible inline view within iframes
+  useEffect(() => {
+    const targetUrl = freshPreviewUrl || previewReceipt;
+    if (!targetUrl) {
+      setPdfBlobUrl(null);
+      return;
+    }
+
+    const isPdf = isPdfReceipt(targetUrl, previewStoragePath);
+    if (!isPdf) {
+      setPdfBlobUrl(null);
+      return;
+    }
+
+    const resolved = getReceiptData(targetUrl);
+    if (!resolved) {
+      setPdfBlobUrl(null);
+      return;
+    }
+
+    if (resolved.startsWith('data:')) {
+      try {
+        const parts = resolved.split(',');
+        const mime = parts[0].match(/:(.*?);/)?.[1] || 'application/pdf';
+        const b64 = parts[1];
+        const bin = atob(b64);
+        const len = bin.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = bin.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: mime });
+        const bUrl = URL.createObjectURL(blob);
+        setPdfBlobUrl(bUrl);
+        return () => {
+          URL.revokeObjectURL(bUrl);
+        };
+      } catch (err) {
+        console.error("PDF data url blob conversion failed:", err);
+        setPdfBlobUrl(resolved);
+      }
+    } else {
+      setPdfBlobUrl(resolved);
+    }
+  }, [freshPreviewUrl, previewReceipt, previewStoragePath]);
 
   // Unified modal close handler that correctly pops history
   const closeModal = () => {
@@ -1771,15 +1818,11 @@ export default function TripDetail() {
                              {(expense.receiptUrl || expense.receiptStoragePath) && (
                             <button 
                               onClick={() => {
-                                if (isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath)) {
-                                  handleOpenDocument(expense.receiptUrl || null, expense.receiptStoragePath);
-                                } else {
-                                  setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
-                                  setPreviewStoragePath(expense.receiptStoragePath);
-                                }
+                                setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
+                                setPreviewStoragePath(expense.receiptStoragePath);
                               }}
                               className="text-slate-400 hover:text-orange-500 transition-colors"
-                              title={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? "Open PDF Document in a new tab" : "View Image Receipt"}
+                              title={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? "View PDF Document" : "View Image Receipt"}
                             >
                               {isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? (
                                 <FileText className="w-4 h-4 text-rose-500 hover:scale-110 transition-all" />
@@ -1821,18 +1864,14 @@ export default function TripDetail() {
                            {(expense.receiptUrl || expense.receiptStoragePath) && (
                             <button 
                               onClick={() => {
-                                if (isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath)) {
-                                  handleOpenDocument(expense.receiptUrl || null, expense.receiptStoragePath);
-                                } else {
-                                  setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
-                                  setPreviewStoragePath(expense.receiptStoragePath);
-                                }
+                                setPreviewReceipt(expense.receiptUrl || 'fetching_preview');
+                                setPreviewStoragePath(expense.receiptStoragePath);
                               }}
                               className={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath)
                                 ? "px-2 py-0.5 rounded-full bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-950/50 text-rose-600 dark:text-rose-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-rose-100 dark:border-rose-900/10 hover:scale-105"
                                 : "px-2 py-0.5 rounded-full bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-emerald-100 dark:border-emerald-900/10 hover:scale-105"
                               }
-                              title={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? "Click to open PDF receipt in a new browser tab for everyone" : "Click to view image receipt details"}
+                              title={isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? "Click to view PDF receipt details" : "Click to view image receipt details"}
                             >
                               {isPdfReceipt(expense.receiptUrl, expense.receiptStoragePath) ? (
                                 <>
@@ -2298,12 +2337,8 @@ export default function TripDetail() {
                           <div 
                             className="flex items-center gap-2.5 min-w-0 font-medium cursor-pointer group/preview"
                             onClick={() => {
-                              if (isPdfReceipt(receiptImage, receiptStoragePath) || receiptFileName?.toLowerCase().includes('.pdf')) {
-                                handleOpenDocument(receiptImage, receiptStoragePath);
-                              } else {
-                                setPreviewReceipt(receiptImage);
-                                setPreviewStoragePath(receiptStoragePath);
-                              }
+                              setPreviewReceipt(receiptImage);
+                              setPreviewStoragePath(receiptStoragePath);
                             }}
                           >
                             {isPdfReceipt(receiptImage, receiptStoragePath) || receiptFileName?.toLowerCase().includes('.pdf') ? (
@@ -2756,22 +2791,23 @@ export default function TripDetail() {
                         <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Refreshing Secure URL...</p>
                       </div>
                     ) : isPdfReceipt(freshPreviewUrl || previewReceipt, previewStoragePath) ? (
-                      <div className="flex flex-col items-center justify-center p-12 text-center w-full">
-                        <div className="w-20 h-20 rounded-3xl bg-orange-500 text-white flex items-center justify-center shadow-2xl mb-6 transform -rotate-3 hover:rotate-0 transition-transform duration-500">
-                          <FileText className="w-10 h-10" />
+                      <div className="w-full h-full flex flex-col relative min-h-[450px]">
+                        <iframe 
+                          src={pdfBlobUrl || getReceiptData(freshPreviewUrl || previewReceipt)} 
+                          className="w-full h-full flex-1 rounded-2xl border-0 overflow-hidden shadow-inner bg-white dark:bg-slate-900"
+                          title="PDF Receipt Viewer"
+                          style={{ width: '100%', height: '100%' }}
+                        />
+                        <div className="absolute bottom-4 right-4 flex gap-2 z-10">
+                          <button 
+                            type="button"
+                            onClick={() => handleOpenDocument(freshPreviewUrl || previewReceipt, previewStoragePath)}
+                            className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-extrabold cursor-pointer border-0"
+                            title="Open in Native Viewer"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" /> Fullscreen View
+                          </button>
                         </div>
-                        <h3 className="text-lg font-black text-slate-800 dark:text-white mb-3">Native PDF Document</h3>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mb-8 max-w-sm leading-relaxed font-medium">
-                          Secure PDF rendering is optimized for your browser's native viewer. Open the document directly for the smoothest experience.
-                        </p>
-                        <button 
-                          onClick={() => handleOpenDocument(freshPreviewUrl || previewReceipt, previewStoragePath)}
-                          className="group relative px-8 py-4 bg-orange-500 hover:bg-orange-600 text-white text-xs font-black uppercase tracking-widest rounded-2xl transition-all shadow-xl shadow-orange-500/30 inline-flex items-center gap-3 active:scale-95 cursor-pointer overflow-hidden"
-                        >
-                          <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                          <span className="relative z-10">Open PDF in New Tab</span>
-                          <ExternalLink className="w-4 h-4 relative z-10" />
-                        </button>
                       </div>
                     ) : !isValidPreviewUrl(freshPreviewUrl || previewReceipt) ? (
                       <div className="flex flex-col items-center justify-center p-8 text-center text-slate-400 w-full">
