@@ -1,0 +1,554 @@
+import { createContext, useContext, useEffect, useState, ReactNode, useMemo } from 'react';
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  orderBy, 
+  doc, 
+  setDoc, 
+  addDoc,
+  Timestamp,
+  updateDoc,
+  deleteDoc,
+  serverTimestamp,
+  arrayUnion,
+  arrayRemove,
+  getDocFromServer,
+  getDocs
+} from 'firebase/firestore';
+import { db, OperationType, handleFirestoreError } from '../lib/firebase';
+import { useAuth } from './AuthContext';
+import { toast } from 'sonner';
+
+export interface Trip {
+  id: string;
+  name: string;
+  destination: string;
+  startDate: string;
+  endDate: string;
+  budget: number;
+  currency: string;
+  ownerId: string;
+  members: string[];
+  createdAt: any;
+  allowTravellerEdits?: boolean;
+}
+
+interface Member {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL: string;
+  role: string;
+  joinedAt: any;
+  lastActive?: number;
+}
+
+interface ChecklistItem {
+  id: string;
+  text: string;
+  completed: boolean;
+  createdBy: string;
+  createdByName: string;
+  createdAt: any;
+  completedAt?: any;
+  dueTime?: string;
+  modifiedCount?: number;
+  completedBy?: string;
+  completedByName?: string;
+}
+
+interface Expense {
+  id: string;
+  amount: number;
+  description: string;
+  category: string;
+  payerId: string;
+  payerName: string;
+  participants: string[];
+  splitType: 'equal' | 'exact' | 'percentage';
+  date: string;
+  createdAt: any;
+  createdByName: string;
+  receiptUrl?: string;
+  receiptStoragePath?: string;
+  time?: string;
+}
+
+interface TripContextType {
+  trips: Trip[];
+  activeTrip: Trip | null;
+  expenses: Expense[];
+  checklist: ChecklistItem[];
+  members: Member[];
+  loading: boolean;
+  indexErrorUrl: string | null;
+  isIndexBuilding: boolean;
+  setActiveTripId: (id: string | null) => void;
+  createTrip: (data: Partial<Trip>) => Promise<void>;
+  joinTrip: (tripId: string) => Promise<void>;
+  addExpense: (tripId: string, data: Partial<Expense>) => Promise<string | undefined>;
+  updateExpense: (tripId: string, expenseId: string, data: Partial<Expense>) => Promise<void>;
+  addChecklistItem: (tripId: string, text: string, dueTime?: string) => Promise<void>;
+  toggleChecklistItem: (tripId: string, itemId: string, completed: boolean) => Promise<void>;
+  removeMember: (tripId: string, memberId: string) => Promise<void>;
+  approveMember: (tripId: string, memberId: string, role?: 'editor' | 'viewer') => Promise<void>;
+  withdrawJoinRequest: (tripId: string) => Promise<void>;
+  updateChecklistItem: (tripId: string, itemId: string, newText: string, newDueTime?: string) => Promise<void>;
+  updateTripSettings: (tripId: string, settings: Partial<Trip>) => Promise<void>;
+  deleteTrip: (tripId: string) => Promise<void>;
+}
+
+const TripContext = createContext<TripContextType | undefined>(undefined);
+
+export function TripProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const [trips, setTrips] = useState<Trip[]>([]);
+  const [activeTripId, setActiveTripId] = useState<string | null>(null);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [indexErrorUrl, setIndexErrorUrl] = useState<string | null>(null);
+  const [isIndexBuilding, setIsIndexBuilding] = useState(false);
+
+  const activeTrip = useMemo(() => trips.find(t => t.id === activeTripId) || null, [trips, activeTripId]);
+
+  // Sync trips
+  useEffect(() => {
+    if (!user) {
+      setTrips([]);
+      setLoading(false);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'trips'),
+      where('members', 'array-contains', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, 
+      (snapshot) => {
+        const tripsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Trip));
+        setTrips(tripsData);
+        setLoading(false);
+        setIndexErrorUrl(null);
+        setIsIndexBuilding(false);
+      },
+      (error) => {
+        if (error.message.includes('requires an index') || error.message.includes('index-needed')) {
+          const match = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s"]+/);
+          if (match) {
+            setIndexErrorUrl(match[0]);
+          }
+          if (error.message.includes('currently building')) {
+            setIsIndexBuilding(true);
+          }
+        }
+        handleFirestoreError(error, OperationType.LIST, 'trips');
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // Sync expenses and checklist for active trip
+  useEffect(() => {
+    // Only subscribe to subcollections when the user actually has access to the active trip.
+    // If the trips list is still loading, wait. If it loaded and the activeTrip is null, do not subscribe.
+    if (loading || !activeTrip || !user) {
+      if (!loading && !activeTrip) {
+        setExpenses([]);
+        setChecklist([]);
+        setMembers([]);
+      }
+      return;
+    }
+
+    const expensesUnsub = onSnapshot(
+      query(collection(db, 'trips', activeTrip.id, 'expenses'), orderBy('createdAt', 'desc')),
+      (snapshot) => setExpenses(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Expense))),
+      (error) => handleFirestoreError(error, OperationType.LIST, `trips/${activeTrip.id}/expenses`)
+    );
+
+    const checklistUnsub = onSnapshot(
+      query(collection(db, 'trips', activeTrip.id, 'checklist'), orderBy('createdAt', 'asc')),
+      (snapshot) => setChecklist(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChecklistItem))),
+      (error) => handleFirestoreError(error, OperationType.LIST, `trips/${activeTrip.id}/checklist`)
+    );
+
+    const membersUnsub = onSnapshot(
+      collection(db, 'trips', activeTrip.id, 'members'),
+      (snapshot) => setMembers(snapshot.docs.map(doc => ({ ...doc.data() } as Member))),
+      (error) => handleFirestoreError(error, OperationType.LIST, `trips/${activeTrip.id}/members`)
+    );
+
+    return () => {
+      expensesUnsub();
+      checklistUnsub();
+      membersUnsub();
+    };
+  }, [activeTrip, loading, user]);
+
+  // Presence Heartbeat Loop (Firestore Heartbeats)
+  useEffect(() => {
+    if (!activeTrip || !user) return;
+
+    // Ensure the current user has access/membership on this trip to avoid permission rejected warnings
+    const isUserMember = activeTrip.members?.includes(user.uid);
+    if (!isUserMember) return;
+
+    const sendHeartbeat = async () => {
+      try {
+        const memberRef = doc(db, 'trips', activeTrip.id, 'members', user.uid);
+        await updateDoc(memberRef, {
+          lastActive: Date.now()
+        });
+      } catch (error) {
+        console.warn('Heartbeat registration failed:', error);
+      }
+    };
+
+    // Instant pulse
+    sendHeartbeat();
+
+    // Pulse every 15 seconds to maintain fresh presence
+    const interval = setInterval(sendHeartbeat, 15000);
+
+    return () => clearInterval(interval);
+  }, [activeTrip?.id, user?.uid]);
+
+  const createTrip = async (data: Partial<Trip>) => {
+    if (!user) return;
+    try {
+      const tripId = doc(collection(db, 'trips')).id;
+      const tripData = {
+        ...data,
+        ownerId: user.uid,
+        members: [user.uid],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        allowTravellerEdits: true
+      };
+      await setDoc(doc(db, 'trips', tripId), tripData);
+
+      await setDoc(doc(db, 'trips', tripId, 'members', user.uid), {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        photoURL: user.photoURL,
+        role: 'owner',
+        joinedAt: serverTimestamp()
+      });
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, 'trips');
+      toast.error(error.message || 'Failed to create trip');
+    }
+  };
+
+  const joinTrip = async (tripId: string) => {
+    if (!user) return;
+    try {
+      const tripRef = doc(db, 'trips', tripId);
+      const tripSnap = await getDocFromServer(tripRef);
+      if (!tripSnap.exists()) throw new Error('Trip not found');
+
+      const tripData = tripSnap.data() as Trip;
+      if (!tripData.members.includes(user.uid)) {
+        await updateDoc(tripRef, {
+          members: arrayUnion(user.uid),
+          updatedAt: serverTimestamp()
+        });
+
+        await setDoc(doc(db, 'trips', tripId, 'members', user.uid), {
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName,
+          photoURL: user.photoURL,
+          role: 'pending',
+          joinedAt: serverTimestamp()
+        });
+      }
+      setActiveTripId(tripId);
+      toast.success('Successfully joined trip!');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/join`);
+      toast.error('Failed to join trip');
+    }
+  };
+
+  const checkWriteAccess = (tripId: string) => {
+    if (!user) throw new Error('Not authenticated');
+    const trip = trips.find(t => t.id === tripId);
+    if (!trip) throw new Error('Trip not found');
+    
+    if (trip.ownerId === user.uid) {
+      return true;
+    }
+    
+    if (trip.allowTravellerEdits === false) {
+      throw new Error('This trip ledger is set to read-only by the organizer.');
+    }
+    
+    const currentMember = members.find(m => m.uid === user.uid);
+    if (!currentMember || currentMember.role !== 'editor') {
+      throw new Error('Your account is set to Viewer (Read-Only) or is Pending approval.');
+    }
+    return true;
+  };
+
+  const addExpense = async (tripId: string, data: Partial<Expense>) => {
+    if (!user) return undefined;
+    try {
+      checkWriteAccess(tripId);
+      const docRef = await addDoc(collection(db, 'trips', tripId, 'expenses'), {
+        ...data,
+        payerId: data.payerId || user.uid,
+        payerName: data.payerName || user.displayName,
+        createdByName: user.displayName,
+        createdAt: serverTimestamp(),
+        time: data.time || null
+      });
+      toast.success('Expense recorded successfully!');
+      return docRef.id;
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/expenses`);
+      toast.error(error.message || 'Failed to record expense');
+      return undefined;
+    }
+  };
+
+  const updateExpense = async (tripId: string, expenseId: string, data: Partial<Expense>) => {
+    if (!user) return;
+    try {
+      checkWriteAccess(tripId);
+      await updateDoc(doc(db, 'trips', tripId, 'expenses', expenseId), data);
+    } catch (error: any) {
+      console.error("Failed to update expense", error);
+    }
+  };
+
+  const addChecklistItem = async (tripId: string, text: string, dueTime?: string) => {
+    if (!user) return;
+    try {
+      checkWriteAccess(tripId);
+      await addDoc(collection(db, 'trips', tripId, 'checklist'), {
+        text,
+        completed: false,
+        createdBy: user.uid,
+        createdByName: user.displayName,
+        createdAt: serverTimestamp(),
+        dueTime: dueTime || null
+      });
+      toast.success('Task added successfully!');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/checklist`);
+      toast.error(error.message || 'Failed to add task');
+    }
+  };
+
+  const toggleChecklistItem = async (tripId: string, itemId: string, completed: boolean) => {
+    try {
+      checkWriteAccess(tripId);
+      await updateDoc(doc(db, 'trips', tripId, 'checklist', itemId), {
+        completed,
+        completedAt: completed ? serverTimestamp() : null,
+        completedBy: completed ? (user?.uid || null) : null,
+        completedByName: completed ? (user?.displayName || null) : null
+      });
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.UPDATE, `trips/${tripId}/checklist/${itemId}`);
+      toast.error(error.message || 'Failed to update task check status');
+    }
+  };
+
+  const removeMember = async (tripId: string, memberId: string) => {
+    if (!user || !activeTrip || user.uid === memberId) return;
+    try {
+      if (activeTrip.ownerId !== user.uid) throw new Error('Only owners can remove members');
+
+      const tripRef = doc(db, 'trips', tripId);
+      const updatedMembers = activeTrip.members.filter(m => m !== memberId);
+      
+      await updateDoc(tripRef, {
+        members: updatedMembers,
+        updatedAt: serverTimestamp()
+      });
+
+      await deleteDoc(doc(db, 'trips', tripId, 'members', memberId));
+      toast.success('Member removed successfully');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/members/${memberId}`);
+      toast.error('Failed to remove member');
+    }
+  };
+
+  const approveMember = async (tripId: string, memberId: string, role: 'editor' | 'viewer' = 'editor') => {
+    if (!user || !activeTrip) return;
+    try {
+      if (activeTrip.ownerId !== user.uid) throw new Error('Only owners can approve members');
+
+      await updateDoc(doc(db, 'trips', tripId, 'members', memberId), {
+        role: role
+      });
+      toast.success(`Traveler approved as ${role === 'editor' ? 'Editor' : 'Viewer'} successfully!`);
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/members/${memberId}/approve`);
+      toast.error('Failed to approve member');
+    }
+  };
+
+  const withdrawJoinRequest = async (tripId: string) => {
+    if (!user) return;
+    try {
+      const tripRef = doc(db, 'trips', tripId);
+      await updateDoc(tripRef, {
+        members: arrayRemove(user.uid),
+        updatedAt: serverTimestamp()
+      });
+
+      await deleteDoc(doc(db, 'trips', tripId, 'members', user.uid));
+      toast.success('Withdrew join request successfully');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.WRITE, `trips/${tripId}/members/${user.uid}/withdraw`);
+      toast.error('Failed to withdraw request');
+    }
+  };
+
+  const updateChecklistItem = async (tripId: string, itemId: string, newText: string, newDueTime?: string) => {
+    try {
+      checkWriteAccess(tripId);
+      const itemRef = doc(db, 'trips', tripId, 'checklist', itemId);
+      const snapshot = await getDocFromServer(itemRef);
+      if (!snapshot.exists()) throw new Error('Objective not found');
+      const itemData = snapshot.data();
+      const currentModifiedCount = itemData.modifiedCount || 0;
+      
+      if (currentModifiedCount >= 1) {
+        toast.error('This objective has already been modified (only 1 edit allowed).');
+        return;
+      }
+
+      await updateDoc(itemRef, {
+        text: newText,
+        dueTime: newDueTime || null,
+        modifiedCount: currentModifiedCount + 1
+      });
+      toast.success('Objective modified successfully!');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.UPDATE, `trips/${tripId}/checklist/${itemId}`);
+      toast.error(error.message || 'Failed to modify objective');
+    }
+  };
+
+  const updateTripSettings = async (tripId: string, settings: Partial<Trip>) => {
+    if (!user) return;
+    try {
+      const trip = trips.find(t => t.id === tripId);
+      if (!trip) throw new Error('Trip not found');
+      if (trip.ownerId !== user.uid) {
+        throw new Error('Only the organizer can update trip settings.');
+      }
+      const tripRef = doc(db, 'trips', tripId);
+      await updateDoc(tripRef, {
+        ...settings,
+        updatedAt: serverTimestamp()
+      });
+      toast.success('Trip setting updated!');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.UPDATE, `trips/${tripId}`);
+      toast.error(error.message || 'Failed to update trip settings');
+    }
+  };
+
+  const deleteTrip = async (tripId: string) => {
+    if (!user) return;
+    try {
+      const trip = trips.find(t => t.id === tripId);
+      if (!trip) throw new Error('Trip not found');
+      if (trip.ownerId !== user.uid) {
+        throw new Error('Only the organizer/owner can delete this trip.');
+      }
+
+      // Check if there are any transaction records (expenses) in this trip
+      const expensesRef = collection(db, 'trips', tripId, 'expenses');
+      const expensesSnap = await getDocs(expensesRef);
+      if (!expensesSnap.empty) {
+        throw new Error('This trip contains transaction records (expenses) and cannot be deleted.');
+      }
+
+      // Sync local order: remove from localStorage
+      const storedOrderStr = localStorage.getItem(`trip_order_${user.uid}`);
+      if (storedOrderStr) {
+        try {
+          const storedOrder: string[] = JSON.parse(storedOrderStr);
+          const updatedOrder = storedOrder.filter(id => id !== tripId);
+          localStorage.setItem(`trip_order_${user.uid}`, JSON.stringify(updatedOrder));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      // If no expenses exist, proceed to delete the trip doc
+      await deleteDoc(doc(db, 'trips', tripId));
+
+      if (activeTripId === tripId) {
+        setActiveTripId(null);
+      }
+      toast.success('Trip deleted successfully!');
+    } catch (error: any) {
+      handleFirestoreError(error, OperationType.DELETE, `trips/${tripId}`);
+      toast.error(error.message || 'Failed to delete trip');
+    }
+  };
+
+  const value = useMemo(() => ({ 
+    trips, 
+    activeTrip, 
+    expenses, 
+    checklist,
+    members,
+    loading,
+    indexErrorUrl,
+    isIndexBuilding,
+    setActiveTripId, 
+    createTrip, 
+    joinTrip,
+    addExpense,
+    updateExpense,
+    addChecklistItem,
+    toggleChecklistItem,
+    removeMember,
+    approveMember,
+    withdrawJoinRequest,
+    updateChecklistItem,
+    updateTripSettings,
+    deleteTrip
+  }), [
+    trips, 
+    activeTrip, 
+    expenses, 
+    checklist, 
+    members, 
+    loading, 
+    indexErrorUrl, 
+    isIndexBuilding
+  ]);
+
+  return (
+    <TripContext.Provider value={value}>
+      {children}
+    </TripContext.Provider>
+  );
+}
+
+export const useTrip = () => {
+  const context = useContext(TripContext);
+  if (context === undefined) {
+    throw new Error('useTrip must be used within a TripProvider');
+  }
+  return context;
+};

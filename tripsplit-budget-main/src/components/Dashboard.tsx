@@ -1,0 +1,533 @@
+import { Plus, MapPin, Calendar, Users, ArrowRight, Wallet, ChevronRight, UserPlus, Link as LinkIcon, AlertTriangle, ExternalLink, HelpCircle, MessageCircle, Search, GripVertical, X } from 'lucide-react';
+import { useTrip, Trip } from '../context/TripContext';
+import { useAuth } from '../context/AuthContext';
+import { formatDate, formatCurrency, cn } from '../lib/utils';
+import { motion, AnimatePresence } from 'motion/react';
+import { createPortal } from 'react-dom';
+import { useState, FormEvent, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { UserAvatar } from './Avatar';
+
+export default function Dashboard() {
+  const { user } = useAuth();
+  const { trips, createTrip, joinTrip, setActiveTripId, indexErrorUrl, isIndexBuilding, loading } = useTrip();
+  const navigate = useNavigate();
+  const [isCreating, setIsCreating] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
+  const [joinId, setJoinId] = useState('');
+  const [newTrip, setNewTrip] = useState({ name: '', destination: '', budget: 0, currency: 'INR' });
+
+  // Search and Sort states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [orderedTrips, setOrderedTrips] = useState<Trip[]>([]);
+
+  // Drag-and-drop states
+  const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [hasDragged, setHasDragged] = useState(false);
+
+  // Synchronize orderedTrips with trips context + localStorage order
+  useEffect(() => {
+    if (!user || trips.length === 0) {
+      setOrderedTrips([]);
+      return;
+    }
+
+    const storedOrderStr = localStorage.getItem(`trip_order_${user.uid}`);
+    let storedOrder: string[] = [];
+    if (storedOrderStr) {
+      try {
+        storedOrder = JSON.parse(storedOrderStr);
+      } catch (e) {
+        console.error('Failed to parse trip order:', e);
+      }
+    }
+
+    const validStoredOrder = storedOrder.filter(id => trips.some(t => t.id === id));
+    const newTrips = trips.filter(t => !validStoredOrder.includes(t.id));
+
+    // Put new/unsorted trips first for immediate visibility
+    const finalOrderIds = [...newTrips.map(t => t.id), ...validStoredOrder];
+
+    const sorted = finalOrderIds
+      .map(id => trips.find(t => t.id === id))
+      .filter((t): t is Trip => !!t);
+
+    setOrderedTrips(sorted);
+  }, [trips, user]);
+
+  // Filter trips by search query (checks name or destination)
+  const filteredTrips = orderedTrips.filter(trip => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    return (
+      trip.name.toLowerCase().includes(q) ||
+      (trip.destination && trip.destination.toLowerCase().includes(q))
+    );
+  });
+
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIdx(index);
+    setHasDragged(true);
+    e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('text/plain', index.toString());
+    } catch (_) {}
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === index) return;
+    setDragOverIdx(index);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === targetIndex) return;
+
+    const reordered = [...orderedTrips];
+    const [draggedItem] = reordered.splice(draggedIdx, 1);
+    reordered.splice(targetIndex, 0, draggedItem);
+
+    setOrderedTrips(reordered);
+
+    if (user) {
+      const orderIds = reordered.map(t => t.id);
+      localStorage.setItem(`trip_order_${user.uid}`, JSON.stringify(orderIds));
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIdx(null);
+    setDragOverIdx(null);
+    setTimeout(() => {
+      setHasDragged(false);
+    }, 50);
+  };
+
+  const handleCardClick = (tripId: string) => {
+    if (hasDragged) return;
+    navigate(`/trip/${tripId}`);
+  };
+
+  const handleCreate = async (e: FormEvent) => {
+    e.preventDefault();
+    await createTrip(newTrip);
+    setIsCreating(false);
+    setNewTrip({ name: '', destination: '', budget: 0, currency: 'INR' });
+  };
+
+  const handleJoin = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!joinId.trim()) return;
+    await joinTrip(joinId.trim());
+    setIsJoining(false);
+    setJoinId('');
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 md:px-6 py-20 md:py-24 min-h-screen">
+      {indexErrorUrl && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={cn(
+            "mb-8 p-4 border rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4",
+            isIndexBuilding 
+              ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800" 
+              : "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800"
+          )}
+        >
+          <div className="flex items-center gap-3">
+            <div className={cn(
+              "p-2 rounded-full",
+              isIndexBuilding 
+                ? "bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-400"
+                : "bg-amber-100 dark:bg-amber-800 text-amber-600 dark:text-amber-400"
+            )}>
+              {isIndexBuilding ? (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                >
+                  <AlertTriangle className="w-5 h-5" />
+                </motion.div>
+              ) : (
+                <AlertTriangle className="w-5 h-5" />
+              )}
+            </div>
+            <div>
+              <h4 className={cn(
+                "text-sm font-bold",
+                isIndexBuilding ? "text-blue-900 dark:text-blue-200" : "text-amber-900 dark:text-amber-200"
+              )}>
+                {isIndexBuilding ? "Database Index Provisioning" : "Database Index Required"}
+              </h4>
+              <p className={cn(
+                "text-[10px] font-medium leading-relaxed",
+                isIndexBuilding ? "text-blue-700 dark:text-blue-400" : "text-amber-700 dark:text-amber-400"
+              )}>
+                {isIndexBuilding 
+                  ? "Your data views are being prepared. This usually takes 1-2 minutes by Firebase. The page will update automatically when ready." 
+                  : "To sort your journeys by date, please click the button to the right to create a required composite index in your Firebase Console."}
+              </p>
+            </div>
+          </div>
+          {!isIndexBuilding && (
+            <a 
+              href={indexErrorUrl} 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="w-full md:w-auto flex items-center justify-center gap-2 px-6 py-3 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold uppercase tracking-widest rounded-xl transition-all shadow-lg active:scale-95"
+            >
+              Create Index
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+          {isIndexBuilding && (
+            <div className="flex items-center gap-2 px-6 py-3 bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-400 text-[10px] font-bold uppercase tracking-widest rounded-xl">
+              Building...
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+        <div>
+          <span className="text-[9px] md:text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Trip Dashboard</span>
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-800 dark:text-white">My Journeys</h2>
+        </div>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setIsJoining(true)}
+            className="flex-1 md:flex-none border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 px-5 py-3 md:py-2.5 rounded-full text-xs font-semibold hover:bg-slate-50 dark:hover:bg-slate-900 transition-all flex items-center justify-center gap-2"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Join with ID</span>
+          </button>
+          <button 
+            onClick={() => setIsCreating(true)}
+            className="flex-1 md:flex-none bg-slate-900 dark:bg-orange-600 text-white px-5 py-3 md:py-2.5 rounded-full text-xs font-semibold hover:bg-slate-800 dark:hover:bg-orange-500 transition-all flex items-center justify-center gap-2 shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Trip</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Search and Filter Bar */}
+      {!loading && trips.length > 0 && (
+        <div className="mb-8 max-w-xl">
+          <div className="relative group">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400 dark:text-slate-500 group-focus-within:text-orange-500 transition-colors">
+              <Search className="w-5 h-5" />
+            </div>
+            <input
+              type="text"
+              placeholder="Search your journeys by name or destination..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full h-12 pl-12 pr-10 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-sm placeholder-slate-400 text-slate-800 dark:text-white outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all shadow-sm"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-amber-500 transition-colors"
+                title="Clear search"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          {searchQuery && (
+            <p className="text-[10px] font-bold text-orange-500/80 uppercase tracking-widest mt-2.5 px-1 flex items-center gap-1.5">
+              <span>Found {filteredTrips.length} matching {filteredTrips.length === 1 ? 'journey' : 'journeys'}</span>
+              <span className="text-[9px] text-slate-400 capitalize normal-case font-medium">(drag reordering paused during search)</span>
+            </p>
+          )}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[1, 2, 3].map((skeleton) => (
+            <motion.div
+              key={skeleton}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5, repeat: Infinity, repeatType: "reverse" }}
+              className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col h-full min-h-[220px]"
+            >
+              <div className="p-6 flex flex-col h-full">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="w-10 h-10 rounded-xl bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                  <div className="w-16 h-8 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                </div>
+                <div className="w-3/4 h-6 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse mb-3" />
+                <div className="w-1/2 h-4 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse mb-6" />
+                <div className="mt-auto pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between">
+                  <div className="w-24 h-6 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                  <div className="w-16 h-4 rounded-lg bg-slate-200 dark:bg-slate-800 animate-pulse" />
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+      ) : trips.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800">
+          <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4">
+            <MapPin className="w-8 h-8 text-slate-300 dark:text-slate-700" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-800 dark:text-white mb-1">No trips found</h3>
+          <p className="text-xs text-slate-400 mb-6 font-medium">Start your first adventure today!</p>
+          <div className="flex gap-4">
+            <button 
+              onClick={() => setIsCreating(true)}
+              className="text-xs font-bold text-orange-500 uppercase tracking-widest hover:underline"
+            >
+              Create &rarr;
+            </button>
+            <button 
+              onClick={() => setIsJoining(true)}
+              className="text-xs font-bold text-slate-400 uppercase tracking-widest hover:underline"
+            >
+              Join &rarr;
+            </button>
+          </div>
+        </div>
+      ) : filteredTrips.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 bg-white dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 text-center p-6">
+          <div className="w-16 h-16 bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-4 text-orange-500">
+            <Search className="w-8 h-8" />
+          </div>
+          <h3 className="text-sm font-bold text-slate-800 dark:text-white mb-1">No matching journeys</h3>
+          <p className="text-xs text-slate-400 mb-6 font-medium max-w-sm mx-auto">
+            We couldn't find any trips matching "{searchQuery}" in your roster. Check spelling or try searching for another destination!
+          </p>
+          <button
+            onClick={() => setSearchQuery('')}
+            className="px-5 py-2 text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 rounded-full transition-all active:scale-95 shadow-sm uppercase tracking-widest"
+          >
+            Clear Search
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredTrips.map((trip, idx) => {
+            const isDragged = draggedIdx === idx;
+            const isDragOver = dragOverIdx === idx;
+
+            return (
+              <div
+                key={trip.id}
+                onClick={() => handleCardClick(trip.id)}
+                className="group cursor-pointer transition-all duration-300"
+                draggable={!searchQuery}
+                onDragStart={(e) => handleDragStart(e, idx)}
+                onDragOver={(e) => handleDragOver(e, idx)}
+                onDragEnd={handleDragEnd}
+                onDrop={(e) => handleDrop(e, idx)}
+              >
+                <div className={cn(
+                  "bg-white dark:bg-slate-900 rounded-2xl border transition-all duration-300 overflow-hidden flex flex-col h-full relative",
+                  isDragged ? "opacity-30 border-dashed border-orange-500 scale-[0.98]" : "border-slate-200 dark:border-slate-800 shadow-sm",
+                  isDragOver ? "ring-2 ring-orange-500 ring-offset-2 dark:ring-offset-slate-950" : "hover:shadow-md hover:border-slate-300 dark:hover:border-slate-700"
+                )}>
+                  <div className="p-6 flex flex-col h-full">
+                    <div className="flex justify-between items-start mb-6">
+                      <div className="flex items-center gap-2">
+                        {!searchQuery && (
+                          <div 
+                            className="cursor-grab active:cursor-grabbing p-1.5 hover:bg-slate-100 dark:hover:bg-slate-850 rounded-lg text-slate-300 hover:text-slate-500 dark:text-slate-600 dark:hover:text-slate-400 transition-colors"
+                            onMouseDown={(e) => {
+                              // Prevent click triggering when initiating drag
+                              e.stopPropagation();
+                            }}
+                            title="Drag to prioritize"
+                          >
+                            <GripVertical className="w-4 h-4" />
+                          </div>
+                        )}
+                        <div className="w-10 h-10 rounded-xl bg-orange-50 dark:bg-orange-950 flex items-center justify-center">
+                          <Wallet className="w-5 h-5 text-orange-500" />
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block leading-none mb-1">Budget</span>
+                        <span className="text-sm font-bold text-slate-800 dark:text-white">{formatCurrency(trip.budget, trip.currency)}</span>
+                      </div>
+                    </div>
+
+                    <h3 className="text-base font-bold text-slate-800 dark:text-white mb-1 group-hover:text-orange-500 transition-colors line-clamp-2">{trip.name}</h3>
+                    <div className="flex items-center gap-1.5 text-slate-400 text-[11px] font-medium mb-6">
+                      <MapPin className="w-3.5 h-3.5" />
+                      <span>{trip.destination || 'Global'}</span>
+                    </div>
+
+                    <div className="mt-auto pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="flex -space-x-1.5">
+                          {trip.members.slice(0, 3).map((uid, i) => (
+                            <div key={i} className="w-6 h-6 rounded-full border-2 border-white dark:border-slate-900 overflow-hidden">
+                               <UserAvatar uid={uid} className="w-full h-full text-[6px]" />
+                            </div>
+                          ))}
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">
+                          {trip.members.length} Members
+                        </span>
+                      </div>
+                      
+                      <button className="text-[10px] font-bold text-slate-300 uppercase tracking-widest group-hover:text-slate-900 dark:group-hover:text-white transition-colors flex items-center gap-1">
+                        Explore <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {createPortal((
+        <>
+          {/* Join Modal */}
+          <AnimatePresence>
+            {isJoining && (
+              <motion.div 
+                initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-6"
+          >
+            <div 
+              className="absolute inset-0 bg-black/60 backdrop-blur-md"
+              onClick={() => setIsJoining(false)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-8 shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 max-h-[85vh] overflow-y-auto"
+            >
+            <div className="w-12 h-12 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center mb-6">
+              <LinkIcon className="w-6 h-6 text-blue-500" />
+            </div>
+            <h2 className="text-2xl font-bold mb-2 dark:text-white">Join a Trip</h2>
+            <p className="text-sm text-slate-400 mb-6 font-medium">Enter the Secret Trip ID provided by your friend to join the expedition.</p>
+            <form onSubmit={handleJoin} className="space-y-4">
+              <input 
+                required
+                type="text" 
+                placeholder="Paste Trip ID here..."
+                value={joinId}
+                onChange={e => setJoinId(e.target.value)}
+                className="w-full h-12 px-5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-blue-500/20 transition-all dark:text-white"
+              />
+              <button 
+                type="submit"
+                className="w-full h-12 rounded-xl font-bold bg-slate-900 dark:bg-blue-600 text-white shadow-lg transition-all active:scale-95"
+              >
+                Sync with Group
+              </button>
+            </form>
+          </motion.div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+
+      {/* Create Modal */}
+      <AnimatePresence>
+        {isCreating && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-6"
+          >
+            <div 
+              className="absolute inset-0 bg-black/60 backdrop-blur-md"
+              onClick={() => setIsCreating(false)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-3xl p-8 shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 max-h-[85vh] overflow-y-auto"
+            >
+            <h2 className="text-2xl font-bold mb-6 dark:text-white">Plan New Journey</h2>
+            <form onSubmit={handleCreate} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Journey Name</label>
+                <input 
+                  required
+                  type="text" 
+                  placeholder="e.g. Kyoto 2024"
+                  value={newTrip.name}
+                  onChange={e => setNewTrip({...newTrip, name: e.target.value})}
+                  className="w-full h-12 px-5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none focus:ring-2 focus:ring-orange-500/20 transition-all dark:text-white"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Locality</label>
+                  <input 
+                    type="text" 
+                    placeholder="Japan"
+                    value={newTrip.destination}
+                    onChange={e => setNewTrip({...newTrip, destination: e.target.value})}
+                    className="w-full h-12 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">Max Spend</label>
+                  <input 
+                    type="number" 
+                    placeholder="2500"
+                    value={newTrip.budget || ''}
+                    onChange={e => setNewTrip({...newTrip, budget: Number(e.target.value)})}
+                    className="w-full h-12 px-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none dark:text-white"
+                  />
+                </div>
+              </div>
+              <div className="pt-2">
+                <button 
+                  type="submit"
+                  className="w-full h-12 rounded-xl font-bold bg-orange-500 text-white shadow-xl shadow-orange-500/20 hover:scale-[1.02] active:scale-95 transition-all"
+                >
+                  Create Trip
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </motion.div>
+      )}
+      </AnimatePresence>
+        </>
+      ), document.body)}
+
+      <footer className="mt-16 pt-8 border-t border-slate-200 dark:border-slate-800 flex flex-col md:flex-row items-center justify-between gap-4 text-xs font-medium text-slate-500">
+        <p>&copy; {new Date().getFullYear()} JourneyTracker.</p>
+        <div className="flex items-center gap-4 border border-slate-200 dark:border-slate-800 rounded-full px-4 py-2 bg-white dark:bg-slate-900 shadow-sm transition-all hover:shadow-md">
+          <Link 
+            to="/help"
+            className="hover:text-amber-600 dark:hover:text-amber-400 transition-colors uppercase tracking-widest font-bold"
+          >
+            How to use
+          </Link>
+          <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+          <Link 
+            to="/contact"
+            className="hover:text-amber-600 dark:hover:text-amber-400 transition-colors uppercase tracking-widest font-bold"
+          >
+            Support
+          </Link>
+        </div>
+      </footer>
+    </div>
+  );
+}

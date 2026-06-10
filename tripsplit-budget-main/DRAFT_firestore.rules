@@ -1,0 +1,132 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(tripId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/trips/$(tripId)/members/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/trips/$(tripId)/members/$(request.auth.uid)).data.role == 'owner';
+    }
+
+    function isMember(tripId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/trips/$(tripId)/members/$(request.auth.uid));
+    }
+
+    // --- Validation Helpers ---
+    function isValidTrip(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.ownerId == request.auth.uid &&
+             data.createdAt == request.time;
+    }
+
+    function isValidMember(data) {
+      return data.uid is string && data.uid.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.role in ['owner', 'editor', 'viewer'] &&
+             data.joinedAt == request.time;
+    }
+
+    function isValidExpense(data) {
+      return data.amount is number && data.amount > 0 &&
+             data.description is string && data.description.size() <= 200 &&
+             data.payerId is string &&
+             data.date is string &&
+             data.createdAt == request.time;
+    }
+
+    function isValidChecklistItem(data) {
+      return data.text is string && data.text.size() <= 500 &&
+             data.completed is bool &&
+             data.createdAt == request.time;
+    }
+
+    function isValidSettlement(data) {
+      return data.amount is number && data.amount > 0 &&
+             data.fromId is string && data.toId is string &&
+             data.status in ['pending', 'completed'] &&
+             data.date is string;
+    }
+
+    // --- Collection Routes ---
+
+    // Trips
+    match /trips/{tripId} {
+      allow get: if isMember(tripId);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid; // Basic list, refined by members check in practice
+      allow create: if isSignedIn() && isEmailVerified() && isValidId(tripId) && isValidTrip(incoming());
+      allow update: if isOwner(tripId) && 
+                      isValidTrip(incoming()) && 
+                      incoming().ownerId == existing().ownerId &&
+                      incoming().createdAt == existing().createdAt &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['name', 'destination', 'startDate', 'endDate', 'budget', 'currency', 'updatedAt']);
+      allow delete: if isOwner(tripId);
+
+      // Members
+      match /members/{memberId} {
+        allow read: if isMember(tripId);
+        // Special case: anyone signed in can add themselves if they have a code (client logic) 
+        // or for simplicity, if owner adds them
+        allow create: if isSignedIn() && isValidId(memberId) && isValidMember(incoming());
+        allow update: if isMember(tripId) && 
+                        (isOwner(tripId) || request.auth.uid == memberId) &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['role', 'displayName', 'photoURL']);
+        allow delete: if isOwner(tripId);
+      }
+
+      // Expenses
+      match /expenses/{expenseId} {
+        allow read: if isMember(tripId);
+        allow create: if isMember(tripId) && isValidId(expenseId) && isValidExpense(incoming()) && incoming().payerId == request.auth.uid;
+        allow update: if isMember(tripId) && 
+                        (incoming().payerId == request.auth.uid || isOwner(tripId)) &&
+                        isValidExpense(incoming()) &&
+                        incoming().payerId == existing().payerId &&
+                        incoming().createdAt == existing().createdAt &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['amount', 'description', 'category', 'date', 'participants', 'splitType']);
+        allow delete: if isMember(tripId) && (existing().payerId == request.auth.uid || isOwner(tripId));
+      }
+
+      // Checklist
+      match /checklist/{itemId} {
+        allow read: if isMember(tripId);
+        allow create: if isMember(tripId) && isValidId(itemId) && isValidChecklistItem(incoming());
+        allow update: if isMember(tripId) && 
+                        incoming().diff(existing()).affectedKeys().hasOnly(['completed', 'text']);
+        allow delete: if isMember(tripId);
+      }
+
+      // Settlements
+      match /settlements/{settlementId} {
+        allow read: if isMember(tripId);
+        allow create: if isMember(tripId) && isValidId(settlementId) && isValidSettlement(incoming());
+        allow update: if isMember(tripId) && (incoming().fromId == request.auth.uid || incoming().toId == request.auth.uid || isOwner(tripId)) &&
+                        incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+        allow delete: if isOwner(tripId);
+      }
+    }
+  }
+}

@@ -14,7 +14,7 @@ export function UserAvatar({
 }) {
   const [imgError, setImgError] = useState(false);
 
-  if (photoURL && photoURL.trim() !== "" && !imgError) {
+  if (photoURL && !imgError) {
     return (
       <img
         src={photoURL}

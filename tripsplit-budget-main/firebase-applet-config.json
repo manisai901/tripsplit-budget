@@ -1,0 +1,9 @@
+{
+  "projectId": "butget-trip",
+  "appId": "1:1000911938989:web:6aed298f52effa30672d24",
+  "apiKey": "AIzaSyC1lAw3TAytWU-w16lO_rPiag1PomolNWs",
+  "authDomain": "butget-trip.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "butget-trip.firebasestorage.app",
+  "messagingSenderId": "1000911938989"
+}
