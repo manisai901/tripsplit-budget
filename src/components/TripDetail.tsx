@@ -1,6 +1,6 @@
 import { 
   ArrowLeft, Plus, DollarSign, PieChart as PieChartIcon, Users, Receipt, 
-  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download, QrCode, Globe, Mic, MicOff, Camera, FileText, Loader2, ExternalLink
+  Trash2, TrendingUp, ChevronRight, MapPin, Plane, CheckCircle2, Circle, Clock, Share2, Copy, Check, UserMinus, X, Filter, Calendar as CalendarIcon, Tag, User as UserIcon, Image as ImageIcon, Activity, AlertTriangle, Download, QrCode, Globe, Mic, MicOff, Camera, FileText, Loader2, ExternalLink, Search
 } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { useTrip } from '../context/TripContext';
@@ -430,19 +430,31 @@ export default function TripDetail() {
 
   const [filterCategory, setFilterCategory] = useState<string>('All');
   const [filterPayer, setFilterPayer] = useState<string>('All');
+  const [filterPaidFor, setFilterPaidFor] = useState<string>('All');
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
   const filteredExpenses = useMemo(() => {
     return expenses.filter(exp => {
       if (filterCategory !== 'All' && exp.category !== filterCategory) return false;
       if (filterPayer !== 'All' && exp.payerId !== filterPayer) return false;
+      if (filterPaidFor !== 'All' && !exp.participants.includes(filterPaidFor)) return false;
       if (filterStartDate && exp.date < filterStartDate) return false;
       if (filterEndDate && exp.date > filterEndDate) return false;
+      
+      if (searchQuery.trim() !== '') {
+        const query = searchQuery.toLowerCase();
+        const matchesDescription = exp.description.toLowerCase().includes(query);
+        const matchesCategory = exp.category.toLowerCase().includes(query);
+        const matchesAmount = String(exp.amount).includes(query);
+        if (!matchesDescription && !matchesCategory && !matchesAmount) return false;
+      }
+      
       return true;
     });
-  }, [expenses, filterCategory, filterPayer, filterStartDate, filterEndDate]);
+  }, [expenses, filterCategory, filterPayer, filterPaidFor, filterStartDate, filterEndDate, searchQuery]);
 
   const totalSpent = useMemo(() => 
     expenses
@@ -1511,19 +1523,29 @@ export default function TripDetail() {
                   <h4 className="text-xs font-bold text-slate-800 dark:text-white uppercase tracking-widest">Transaction Records</h4>
                   <p className="text-[10px] text-slate-400 font-medium mt-0.5">Verified expenses for all members.</p>
                 </div>
-                <div className="flex items-center gap-3 self-start sm:self-auto">
+                <div className="flex items-center gap-3 self-start sm:self-auto flex-wrap">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search expenses..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-8 pr-4 py-2 bg-slate-100 dark:bg-slate-800 border border-transparent focus:border-orange-500 focus:bg-white dark:focus:bg-slate-900 rounded-full text-[11px] font-medium text-slate-800 dark:text-slate-200 w-full sm:w-48 transition-all focus:outline-none placeholder:text-slate-400"
+                    />
+                  </div>
                   <button
                     onClick={() => setIsFiltersOpen(!isFiltersOpen)}
                     className={cn(
                       "flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all",
-                      isFiltersOpen || filterCategory !== 'All' || filterPayer !== 'All' || filterStartDate || filterEndDate
+                      isFiltersOpen || filterCategory !== 'All' || filterPayer !== 'All' || filterPaidFor !== 'All' || filterStartDate || filterEndDate
                         ? "bg-orange-500 text-white shadow-lg shadow-orange-500/20"
                         : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
                     )}
                   >
                     <Filter className="w-3 h-3" />
                     Filters
-                    {(filterCategory !== 'All' || filterPayer !== 'All' || filterStartDate || filterEndDate) && (
+                    {(filterCategory !== 'All' || filterPayer !== 'All' || filterPaidFor !== 'All' || filterStartDate || filterEndDate) && (
                       <span className="w-1.5 h-1.5 rounded-full bg-white ml-0.5"></span>
                     )}
                   </button>
@@ -1550,18 +1572,35 @@ export default function TripDetail() {
                     exit={{ opacity: 0, height: 0 }}
                     className="overflow-hidden"
                   >
-                    <div className="pt-4 pb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 border-t border-slate-100 dark:border-slate-800 mt-2">
+                    <div className="pt-4 pb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 border-t border-slate-100 dark:border-slate-800 mt-2">
                       {/* Payer Filter */}
                       <div>
                         <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
-                          <UserIcon className="w-3 h-3" /> Payer
+                          <UserIcon className="w-3 h-3" /> Paid By
                         </label>
                         <select
                           value={filterPayer}
                           onChange={(e) => setFilterPayer(e.target.value)}
                           className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none dark:text-white text-xs font-medium"
                         >
-                          <option value="All">All Members</option>
+                          <option value="All">All Travelers</option>
+                          {members.map(m => (
+                            <option key={m.uid} value={m.uid}>{m.displayName}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Paid For Filter */}
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                          <UserIcon className="w-3 h-3" /> Paid For
+                        </label>
+                        <select
+                          value={filterPaidFor}
+                          onChange={(e) => setFilterPaidFor(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none dark:text-white text-xs font-medium"
+                        >
+                          <option value="All">All Travelers</option>
                           {members.map(m => (
                             <option key={m.uid} value={m.uid}>{m.displayName}</option>
                           ))}
