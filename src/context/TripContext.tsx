@@ -125,19 +125,24 @@ export function TripProvider({ children }: { children: ReactNode }) {
 
     const q = query(
       collection(db, 'trips'),
-      where('members', 'array-contains', user.uid),
-      orderBy('createdAt', 'desc')
+      where('members', 'array-contains', user.uid)
     );
 
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
         const tripsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Trip));
+        // Sort locally
+        tripsData.sort((a, b) => {
+           const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+           const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+           return timeB - timeA;
+        });
         setTrips(tripsData);
         setLoading(false);
         setIndexErrorUrl(null);
         setIsIndexBuilding(false);
       },
-      (error) => {
+      (error: any) => {
         if (error.message.includes('requires an index') || error.message.includes('index-needed')) {
           const match = error.message.match(/https:\/\/console\.firebase\.google\.com[^\s"]+/);
           if (match) {
@@ -148,6 +153,9 @@ export function TripProvider({ children }: { children: ReactNode }) {
           }
         }
         handleFirestoreError(error, OperationType.LIST, 'trips');
+        if (error?.code === 'permission-denied' || String(error).includes('permissions')) {
+          setTrips([]);
+        }
         setLoading(false);
       }
     );
@@ -159,8 +167,8 @@ export function TripProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Only subscribe to subcollections when the user actually has access to the active trip.
     // If the trips list is still loading, wait. If it loaded and the activeTrip is null, do not subscribe.
-    if (loading || !activeTrip || !user) {
-      if (!loading && !activeTrip) {
+    if (loading || !activeTrip || !user || !activeTrip.members?.includes(user.uid)) {
+      if (!loading && (!activeTrip || (activeTrip && !activeTrip.members?.includes(user.uid)))) {
         setExpenses([]);
         setChecklist([]);
         setMembers([]);

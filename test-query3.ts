@@ -1,0 +1,21 @@
+import { initializeApp } from "firebase/app";
+import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+import { getFirestore, collection, query, where, getDocs, orderBy } from "firebase/firestore";
+
+import fs from 'fs';
+const firebaseConfig = JSON.parse(fs.readFileSync('./firebase-applet-config.json', 'utf8'));
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+async function run() {
+  await signInWithEmailAndPassword(auth, "manikantasaivootla@gmail.com", "password123").catch(e => console.log("Login failed", e.message));
+  try {
+    const q1 = collection(db, 'trips', 'trip_123', 'members');
+    const snap = await getDocs(q1);
+    console.log("Q1 success.");
+  } catch (e: any) {
+    console.error("Path in error:", e.customData, e.message);
+  }
+}
+run();
