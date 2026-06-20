@@ -74,6 +74,7 @@ interface Expense {
   receiptUrl?: string;
   receiptStoragePath?: string;
   time?: string;
+  isExcluded?: boolean;
 }
 
 interface TripContextType {

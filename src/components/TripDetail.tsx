@@ -240,6 +240,7 @@ export default function TripDetail() {
   const [copied, setCopied] = useState(false);
   const [qrUrl, setQrUrl] = useState('');
   const [isShowingQRModal, setIsShowingQRModal] = useState(false);
+  const [sharedParticipantsModalExpense, setSharedParticipantsModalExpense] = useState<any | null>(null);
 
   useEffect(() => {
     if (activeTrip?.id) {
@@ -458,13 +459,13 @@ export default function TripDetail() {
 
   const totalSpent = useMemo(() => 
     expenses
-      .filter(exp => exp.category !== 'Settlement')
+      .filter(exp => exp.category !== 'Settlement' && !exp.isExcluded)
       .reduce((sum, exp) => sum + exp.amount, 0), 
   [expenses]);
 
   const categoryChartData = useMemo(() => {
     const data: Record<string, number> = {};
-    expenses.filter(exp => exp.category !== 'Settlement').forEach(exp => {
+    expenses.filter(exp => exp.category !== 'Settlement' && !exp.isExcluded).forEach(exp => {
       data[exp.category] = (data[exp.category] || 0) + exp.amount;
     });
     return Object.entries(data).map(([name, value]) => ({ name, value }));
@@ -472,7 +473,7 @@ export default function TripDetail() {
 
   const memberChartData = useMemo(() => {
     const data: Record<string, number> = {};
-    expenses.filter(exp => exp.category !== 'Settlement').forEach(exp => {
+    expenses.filter(exp => exp.category !== 'Settlement' && !exp.isExcluded).forEach(exp => {
       data[exp.payerName] = (data[exp.payerName] || 0) + exp.amount;
     });
     return Object.entries(data).map(([name, value]) => ({ name, value }));
@@ -490,6 +491,7 @@ export default function TripDetail() {
 
     // Calculate
     expenses.forEach(exp => {
+      if (exp.isExcluded) return;
       const isSettlement = exp.category === 'Settlement';
       
       // Add to payer's paid total
@@ -1681,7 +1683,10 @@ export default function TripDetail() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.02 }}
-                    className="flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded-2xl transition-colors group"
+                    className={cn(
+                      "flex items-center justify-between p-4 hover:bg-slate-50 dark:hover:bg-slate-800/30 rounded-2xl transition-colors group",
+                      expense.isExcluded && "opacity-55 bg-slate-100/30 dark:bg-slate-900/10 border border-dashed border-slate-200 dark:border-slate-850"
+                    )}
                   >
                     <div className="flex items-center gap-4">
                       {expense.receiptUrl ? (
@@ -1718,9 +1723,12 @@ export default function TripDetail() {
                         </div>
                       )}
                       <div>
-                        <h5 className="text-sm md:text-base font-bold text-slate-800 dark:text-white flex items-center gap-2">
+                        <h5 className={cn(
+                          "text-sm md:text-base font-bold text-slate-800 dark:text-white flex items-center gap-2",
+                          expense.isExcluded && "line-through text-slate-450 dark:text-slate-500"
+                        )}>
                           {expense.description}
-                           {expense.receiptUrl && (
+                          {expense.receiptUrl && (
                             <button 
                               onClick={() => {
                                 if (isPdfReceipt(expense.receiptUrl)) {
@@ -1771,6 +1779,36 @@ export default function TripDetail() {
                               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> Shared with {expense.participants?.length || activeTrip?.members?.length || 0}
                             </span>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => setSharedParticipantsModalExpense(expense)}
+                            className="px-2 py-0.5 rounded-full bg-slate-100 hover:bg-slate-250 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border border-slate-200 dark:border-slate-700"
+                            title="View shared travelers"
+                          >
+                            <Users className="w-2.5 h-2.5 text-orange-500" /> View
+                          </button>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await updateExpense(activeTrip.id, expense.id, { isExcluded: !expense.isExcluded });
+                                  toast.success(expense.isExcluded ? "Transaction reinstated!" : "Transaction marked with strikethrough and excluded.");
+                                } catch (err: any) {
+                                  toast.error("Failed to update status.");
+                                }
+                              }}
+                              className={cn(
+                                "px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 transition-all cursor-pointer shadow-sm border",
+                                expense.isExcluded
+                                  ? "bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/15 dark:hover:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
+                                  : "bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/15 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-450 border-rose-200 dark:border-rose-900/30"
+                              )}
+                              title={expense.isExcluded ? "Include back in total calculations" : "Strikethrough and exclude from calculation"}
+                            >
+                              {expense.isExcluded ? 'Include' : 'Strikethrough'}
+                            </button>
+                          )}
                           {expense.receiptUrl && (
                             <button 
                               onClick={() => {
@@ -1791,7 +1829,10 @@ export default function TripDetail() {
                       </div>
                     </div>
                     <div className="flex flex-col items-end">
-                      <span className="text-base md:text-lg font-black text-slate-900 dark:text-white font-mono">
+                      <span className={cn(
+                        "text-base md:text-lg font-black text-slate-900 dark:text-white font-mono",
+                        expense.isExcluded && "line-through text-slate-450 dark:text-slate-500"
+                      )}>
                         {formatCurrency(expense.amount, activeTrip.currency)}
                       </span>
                       {expense.time && (
@@ -1927,16 +1968,26 @@ export default function TripDetail() {
                               const isPayer = exp.payerId === member.uid;
                               const pts = exp.participants || activeTrip.members || [];
                               const isParticipant = pts.some((p: any) => (typeof p === 'string' ? p : (p.uid || p.id)) === member.uid);
-                              const myShare = isParticipant ? exp.amount / (pts.length || 1) : 0;
+                              const myShare = isParticipant && !exp.isExcluded ? exp.amount / (pts.length || 1) : 0;
                               
                               return (
                                 <div key={exp.id} className="flex justify-between items-center text-[10px]">
-                                  <span className="text-slate-300 truncate max-w-[100px]">{exp.description}</span>
+                                  <span className={cn("text-slate-300 truncate max-w-[100px]", exp.isExcluded && "line-through text-slate-550")}>{exp.description}</span>
                                   <div className="flex gap-4 font-mono text-[9px]">
-                                    <span className={cn("w-12 text-right", isPayer ? "text-emerald-400" : "text-slate-600")}>
+                                    <span className={cn(
+                                      "w-12 text-right", 
+                                      exp.isExcluded 
+                                        ? "text-slate-550 line-through" 
+                                        : (isPayer ? "text-emerald-400" : "text-slate-600")
+                                    )}>
                                       {isPayer ? `+${formatCurrency(exp.amount, activeTrip.currency)}` : '-'}
                                     </span>
-                                    <span className={cn("w-12 text-right", isParticipant ? "text-red-400" : "text-slate-600")}>
+                                    <span className={cn(
+                                      "w-12 text-right", 
+                                      exp.isExcluded 
+                                        ? "text-slate-550 line-through" 
+                                        : (isParticipant ? "text-red-400" : "text-slate-600")
+                                    )}>
                                       {isParticipant ? `-${formatCurrency(myShare, activeTrip.currency)}` : '-'}
                                     </span>
                                   </div>
@@ -2987,6 +3038,104 @@ export default function TripDetail() {
               >
                 Close
               </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* View Shared Recipients Modal */}
+      <AnimatePresence>
+        {sharedParticipantsModalExpense && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/40 dark:bg-black/60 backdrop-blur-sm"
+          >
+            <div 
+              className="absolute inset-0"
+              onClick={() => setSharedParticipantsModalExpense(null)}
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: "spring", duration: 0.4 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-3xl overflow-hidden shadow-2xl relative z-10 border border-slate-200 dark:border-slate-800 max-h-[85vh] overflow-y-auto"
+            >
+              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/20">
+                <div className="text-left">
+                  <h3 className="text-base font-black dark:text-white flex items-center gap-2">
+                    <Users className="w-5 h-5 text-orange-500" />
+                    Shared Recipients
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
+                    Recipients of {sharedParticipantsModalExpense.description}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setSharedParticipantsModalExpense(null)} 
+                  className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-slate-400" />
+                </button>
+              </div>
+
+              <div className="p-6">
+                <div className="mb-4 bg-slate-50 dark:bg-slate-800/40 border border-slate-100 dark:border-slate-800/60 p-4 rounded-2xl flex justify-between items-center">
+                  <div className="text-left">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Total Transaction Value</span>
+                    <span className="text-lg font-black text-slate-800 dark:text-white">{formatCurrency(sharedParticipantsModalExpense.amount, activeTrip.currency)}</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Per Person Split</span>
+                    <span className="text-sm font-black text-orange-500 font-mono">
+                      {formatCurrency(sharedParticipantsModalExpense.amount / (sharedParticipantsModalExpense.participants?.length || activeTrip?.members?.length || 1), activeTrip.currency)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                  {(() => {
+                    const participantUids = sharedParticipantsModalExpense.participants || activeTrip?.members || [];
+                    return participantUids.map((uid: string) => {
+                      const member = members.find(m => m.uid === uid);
+                      return (
+                        <div key={uid} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-150/40 dark:border-slate-800/40">
+                          <div className="flex items-center gap-3">
+                            <UserAvatar 
+                              uid={uid}
+                              displayName={member?.displayName || 'Traveler'}
+                              photoURL={member?.photoURL}
+                              className="w-10 h-10 font-bold border border-slate-100 dark:border-slate-850"
+                            />
+                            <div className="text-left">
+                              <p className="text-sm font-bold dark:text-white truncate max-w-[150px]">{member?.displayName || 'Nomad / Friend'}</p>
+                              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">{member?.email || 'Individual user'}</p>
+                            </div>
+                          </div>
+                          
+                          <span className={cn(
+                            "text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-md",
+                            uid === sharedParticipantsModalExpense.payerId 
+                              ? "bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400" 
+                              : "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+                          )}>
+                            {uid === sharedParticipantsModalExpense.payerId ? 'Payer' : 'Debtor'}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+
+                <button 
+                  onClick={() => setSharedParticipantsModalExpense(null)}
+                  className="w-full mt-6 h-12 rounded-xl font-bold bg-slate-900 dark:bg-orange-600 hover:scale-[1.01] active:scale-[0.99] text-white transition-all text-xs uppercase tracking-widest"
+                >
+                  Close
+                </button>
+              </div>
             </motion.div>
           </motion.div>
         )}
