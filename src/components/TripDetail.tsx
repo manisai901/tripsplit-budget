@@ -432,6 +432,7 @@ export default function TripDetail() {
   const [filterCategory, setFilterCategory] = useState<string>('All');
   const [filterPayer, setFilterPayer] = useState<string>('All');
   const [filterPaidFor, setFilterPaidFor] = useState<string>('All');
+  const [filterTraveler, setFilterTraveler] = useState<string>('All');
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -442,6 +443,14 @@ export default function TripDetail() {
       if (filterCategory !== 'All' && exp.category !== filterCategory) return false;
       if (filterPayer !== 'All' && exp.payerId !== filterPayer) return false;
       if (filterPaidFor !== 'All' && !exp.participants.includes(filterPaidFor)) return false;
+      
+      if (filterTraveler !== 'All') {
+        const pts = exp.participants || [];
+        const isParticipant = pts.some((p: any) => (typeof p === 'string' ? p : (p.uid || p.id)) === filterTraveler);
+        const isPayer = exp.payerId === filterTraveler;
+        if (!isPayer && !isParticipant) return false;
+      }
+
       if (filterStartDate && exp.date < filterStartDate) return false;
       if (filterEndDate && exp.date > filterEndDate) return false;
       
@@ -455,7 +464,39 @@ export default function TripDetail() {
       
       return true;
     });
-  }, [expenses, filterCategory, filterPayer, filterPaidFor, filterStartDate, filterEndDate, searchQuery]);
+  }, [expenses, filterCategory, filterPayer, filterPaidFor, filterTraveler, filterStartDate, filterEndDate, searchQuery]);
+
+  const travelerStats = useMemo(() => {
+    let totalPaid = 0;
+    let totalShare = 0;
+
+    if (filterTraveler === 'All') {
+      return { totalPaid, totalShare };
+    }
+
+    expenses.forEach(exp => {
+      // Ignore settlements and excluded transactions
+      if (exp.category === 'Settlement' || exp.isExcluded) return;
+
+      // Check dates
+      if (filterStartDate && exp.date < filterStartDate) return;
+      if (filterEndDate && exp.date > filterEndDate) return;
+
+      // 1. Total Paid
+      if (exp.payerId === filterTraveler) {
+        totalPaid += exp.amount;
+      }
+
+      // 2. Personal Share
+      const pts = exp.participants || activeTrip?.members || [];
+      const isParticipant = pts.some((p: any) => (typeof p === 'string' ? p : (p.uid || p.id)) === filterTraveler);
+      if (isParticipant) {
+        totalShare += exp.amount / (pts.length || 1);
+      }
+    });
+
+    return { totalPaid, totalShare };
+  }, [expenses, filterTraveler, filterStartDate, filterEndDate, activeTrip]);
 
   const totalSpent = useMemo(() => 
     expenses
@@ -1540,14 +1581,14 @@ export default function TripDetail() {
                     onClick={() => setIsFiltersOpen(!isFiltersOpen)}
                     className={cn(
                       "flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all",
-                      isFiltersOpen || filterCategory !== 'All' || filterPayer !== 'All' || filterPaidFor !== 'All' || filterStartDate || filterEndDate
+                      isFiltersOpen || filterCategory !== 'All' || filterPayer !== 'All' || filterPaidFor !== 'All' || filterTraveler !== 'All' || filterStartDate || filterEndDate
                         ? "bg-orange-500 text-white shadow-lg shadow-orange-500/20"
                         : "bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
                     )}
                   >
                     <Filter className="w-3 h-3" />
                     Filters
-                    {(filterCategory !== 'All' || filterPayer !== 'All' || filterPaidFor !== 'All' || filterStartDate || filterEndDate) && (
+                    {(filterCategory !== 'All' || filterPayer !== 'All' || filterPaidFor !== 'All' || filterTraveler !== 'All' || filterStartDate || filterEndDate) && (
                       <span className="w-1.5 h-1.5 rounded-full bg-white ml-0.5"></span>
                     )}
                   </button>
@@ -1574,7 +1615,24 @@ export default function TripDetail() {
                     exit={{ opacity: 0, height: 0 }}
                     className="overflow-hidden"
                   >
-                    <div className="pt-4 pb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 border-t border-slate-100 dark:border-slate-800 mt-2">
+                    <div className="pt-4 pb-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 border-t border-slate-100 dark:border-slate-800 mt-2">
+                      {/* Traveler Name Filter */}
+                      <div>
+                        <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
+                          <UserIcon className="w-3 h-3 text-orange-500" /> Traveler Name
+                        </label>
+                        <select
+                          value={filterTraveler}
+                          onChange={(e) => setFilterTraveler(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg px-3 py-2 outline-none dark:text-white text-xs font-medium"
+                        >
+                          <option value="All">All Travelers</option>
+                          {members.map(m => (
+                            <option key={m.uid} value={m.uid}>{m.displayName}</option>
+                          ))}
+                        </select>
+                      </div>
+
                       {/* Payer Filter */}
                       <div>
                         <label className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-slate-400 mb-1.5">
@@ -1655,6 +1713,49 @@ export default function TripDetail() {
                         />
                       </div>
                     </div>
+
+                    {/* Traveler Expenditure Summary Banner */}
+                    {filterTraveler !== 'All' && (filterStartDate || filterEndDate) && (
+                      <div className="mt-4 p-4 rounded-2xl bg-gradient-to-r from-orange-500/10 to-amber-500/10 border border-orange-500/20 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <Users className="w-4 h-4 text-orange-500" />
+                            <span className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-wider">
+                              Traveler Expenditure Report
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                            Summary for <strong className="text-slate-700 dark:text-slate-200">{members.find(m => m.uid === filterTraveler)?.displayName || 'Selected Traveler'}</strong>
+                            {filterStartDate && filterEndDate ? (
+                              <> from <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{filterStartDate}</span> to <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{filterEndDate}</span></>
+                            ) : filterStartDate ? (
+                              <> since <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{filterStartDate}</span></>
+                            ) : (
+                              <> up to <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{filterEndDate}</span></>
+                            )}
+                          </p>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 shrink-0 sm:min-w-[280px]">
+                          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur rounded-xl p-2.5 border border-slate-100 dark:border-slate-800 flex flex-col justify-center">
+                            <span className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest block mb-0.5">
+                              Total Expenses Paid
+                            </span>
+                            <span className="text-sm font-black text-slate-800 dark:text-white font-mono">
+                              {formatCurrency(travelerStats.totalPaid, activeTrip.currency)}
+                            </span>
+                          </div>
+                          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur rounded-xl p-2.5 border border-slate-100 dark:border-slate-800 flex flex-col justify-center">
+                            <span className="text-[8px] font-bold text-orange-500 dark:text-orange-400 uppercase tracking-widest block mb-0.5">
+                              Personal Share (Cost)
+                            </span>
+                            <span className="text-sm font-black text-orange-600 dark:text-orange-400 font-mono">
+                              {formatCurrency(travelerStats.totalShare, activeTrip.currency)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -1670,6 +1771,8 @@ export default function TripDetail() {
                       <button onClick={() => {
                         setFilterCategory('All');
                         setFilterPayer('All');
+                        setFilterPaidFor('All');
+                        setFilterTraveler('All');
                         setFilterStartDate('');
                         setFilterEndDate('');
                       }} className="text-orange-500 hover:underline cursor-pointer">Clear Filters</button>
